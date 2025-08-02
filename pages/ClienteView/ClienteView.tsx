@@ -1,13 +1,7 @@
-// src/App.tsx
+// src/pages/ClienteView.tsx
 import { useState, useEffect } from "react";
-import {
-  BrowserRouter as Router,
-  Routes,
-  Route,
-  useNavigate,
-  useParams,
-} from "react-router-dom";
-import { db } from "../firebase";
+import { useNavigate, useParams } from "react-router-dom";
+import { db } from "../../firebase";
 import {
   collectionGroup,
   collection,
@@ -15,7 +9,11 @@ import {
   query,
   where,
 } from "firebase/firestore";
-import "./App.css";
+
+interface Ejercicio {
+  ejercicio: string;
+  peso: string;
+}
 
 interface Cliente {
   nombre: string;
@@ -24,45 +22,10 @@ interface Cliente {
   horario: string;
   fechaVencimiento: string;
   ultimaActualizacion: string;
-  rutina?: Record<string, { ejercicio: string; peso: string }[]>;
+  rutina?: Record<string, Ejercicio[]>;
 }
 
-function Login() {
-  const [dni, setDni] = useState("");
-  const navigate = useNavigate();
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    navigate(`/cliente/${dni}`);
-  };
-
-  return (
-    <div className="h-screen bg-[#0f1c3f] flex flex-col items-center justify-center text-white">
-      <h1 className="text-2xl mb-6">INGRESE SU DNI PARA INICIAR SESIÓN</h1>
-      <form
-        onSubmit={handleSubmit}
-        className="flex flex-col gap-4 items-center"
-      >
-        <input
-          type="text"
-          placeholder="DNI"
-          value={dni}
-          onChange={(e) => setDni(e.target.value)}
-          className="p-3 rounded text-black w-64"
-          required
-        />
-        <button
-          type="submit"
-          className="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded text-white"
-        >
-          Entrar
-        </button>
-      </form>
-    </div>
-  );
-}
-
-function ClienteView() {
+export default function ClienteView() {
   const { dni } = useParams<{ dni: string }>();
   const [cliente, setCliente] = useState<Cliente | null>(null);
   const [loading, setLoading] = useState(true);
@@ -74,20 +37,32 @@ function ClienteView() {
       try {
         if (!dni) return;
 
-        // 🔍 Buscar el cliente en TODAS las subcolecciones "clientes"
-        const q = query(collectionGroup(db, "clientes"), where("dni", "==", dni.trim()));
+        const dniBuscado = String(dni).trim();
+        console.log("🔍 Buscando cliente con DNI:", dniBuscado);
+
+        // Buscar en TODAS las subcolecciones "clientes"
+        const q = query(
+          collectionGroup(db, "clientes"),
+          where("dni", "==", dniBuscado)
+        );
         const snapshot = await getDocs(q);
+
+        console.log("📌 Documentos encontrados:", snapshot.size);
+        snapshot.forEach((doc) => console.log("➡️ Cliente:", doc.data()));
 
         if (!snapshot.empty) {
           const clienteDoc = snapshot.docs[0];
           const clienteData = clienteDoc.data() as Cliente;
 
-          // 🔍 Buscar rutinas en la subcolección del cliente encontrado
-          const rutinasRef = collection(clienteDoc.ref, "rutinas");
+          // Buscar rutinas
+          const rutinasRef = collection(db, `${clienteDoc.ref.path}/rutinas`);
           const rutinasSnap = await getDocs(rutinasRef);
 
+          console.log("📌 Rutinas encontradas:", rutinasSnap.size);
+          rutinasSnap.forEach((doc) => console.log("➡️ Rutina:", doc.data()));
+
           if (!rutinasSnap.empty) {
-            const rutinaData: Record<string, { ejercicio: string; peso: string }[]> = {};
+            const rutinaData: Record<string, Ejercicio[]> = {};
             rutinasSnap.forEach((doc) => {
               rutinaData[doc.id] = doc.data().ejercicios || [];
             });
@@ -108,9 +83,11 @@ function ClienteView() {
     fetchCliente();
   }, [dni]);
 
-  if (loading) return <p className="p-6 text-center">Cargando...</p>;
+  if (loading) {
+    return <p className="p-6 text-center">Cargando...</p>;
+  }
 
-  if (!cliente)
+  if (!cliente) {
     return (
       <div className="h-screen flex flex-col items-center justify-center">
         <p>No se encontró un cliente con el DNI {dni}</p>
@@ -122,6 +99,7 @@ function ClienteView() {
         </button>
       </div>
     );
+  }
 
   // Calcular días restantes
   const hoy = new Date();
@@ -130,30 +108,54 @@ function ClienteView() {
   const diffMs = vencimiento.getTime() - hoy.getTime();
   const diasRestantes = Math.max(Math.floor(diffMs / (1000 * 60 * 60 * 24)), 0);
 
+  const diasSemana = ["L", "M", "X", "J", "V", "S", "D"];
+  const nombresDias = [
+    "Lunes",
+    "Martes",
+    "Miércoles",
+    "Jueves",
+    "Viernes",
+    "Sábado",
+    "Domingo",
+  ];
+
   return (
     <div className="bg-gray-100 min-h-screen">
-      <header className="bg-[#0f1c3f] text-white p-4 flex justify-between items-center">
-        <h1 className="font-bold">Hola {cliente.nombre}</h1>
-        <span>{cliente.dias.length} veces x semana</span>
+      <header className="bg-[#0f1c3f] text-white p-4 flex flex-col sm:flex-row sm:justify-between sm:items-center">
+        <h1 className="font-bold text-lg">
+          Hola {cliente.nombre?.toUpperCase()}
+        </h1>
+        <div className="mt-2 sm:mt-0 flex flex-col sm:flex-row sm:items-center gap-2">
+          <span>{cliente.dias?.length || 0} veces x semana</span>
+          <span className="text-green-400">Días restantes: {diasRestantes}</span>
+          <span>{cliente.dias?.join(" - ")}</span>
+        </div>
       </header>
 
       <div className="bg-white shadow m-4 p-4 rounded">
-        <p className="font-semibold text-green-600">
-          Días restantes: {diasRestantes}
+        <p className="text-gray-600">
+          <span className="font-semibold">Horario: </span>
+          {cliente.horario}
         </p>
-        <p className="text-gray-600">Plan: {cliente.dias.join(" - ")}</p>
+        <p className="text-sm text-gray-500">
+          Última actualización:{" "}
+          {cliente.ultimaActualizacion
+            ? new Date(cliente.ultimaActualizacion).toLocaleDateString()
+            : "No disponible"}
+        </p>
       </div>
 
-      <div className="m-4">
-        {["L", "M", "X", "J", "V", "S", "D"].map((claveDia, idx) => (
-          <details key={idx} className="mb-2 bg-white shadow rounded">
-            <summary className="cursor-pointer px-4 py-2 font-semibold bg-gray-200">
-              {["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"][idx]}
+      <div className="m-4 flex flex-col gap-3">
+        {diasSemana.map((clave, idx) => (
+          <details key={idx} className="bg-white shadow rounded overflow-hidden">
+            <summary className="cursor-pointer px-4 py-3 font-semibold bg-gray-200 flex justify-between items-center">
+              <span>{nombresDias[idx]}</span>
+              <span className="text-lg">∨</span>
             </summary>
             <div className="p-4">
-              {cliente.rutina && cliente.rutina[claveDia] ? (
-                <ul>
-                  {cliente.rutina[claveDia].map((ej, i) => (
+              {cliente.rutina && cliente.rutina[clave] && cliente.rutina[clave].length > 0 ? (
+                <ul className="space-y-2">
+                  {cliente.rutina[clave].map((ej, i) => (
                     <li key={i} className="flex justify-between border-b py-1">
                       <span>{ej.ejercicio}</span>
                       <span>{ej.peso}</span>
@@ -179,16 +181,3 @@ function ClienteView() {
     </div>
   );
 }
-
-function App() {
-  return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<Login />} />
-        <Route path="/cliente/:dni" element={<ClienteView />} />
-      </Routes>
-    </Router>
-  );
-}
-
-export default App;
