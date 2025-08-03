@@ -1,194 +1,28 @@
 // src/App.tsx
-import { useState, useEffect } from "react";
-import {
-  BrowserRouter as Router,
-  Routes,
-  Route,
-  useNavigate,
-  useParams,
-} from "react-router-dom";
-import { db } from "../firebase";
-import {
-  collectionGroup,
-  collection,
-  getDocs,
-  query,
-  where,
-} from "firebase/firestore";
-import "./App.css";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import Login from "./pages/ClienteView/Login";
+import ClienteView from "./pages/ClienteView/ClienteView";
+import Header from "./components/Header";
+import Footer from "./components/Footer";
 
-interface Cliente {
-  nombre: string;
-  dni: string;
-  dias: string[];
-  horario: string;
-  fechaVencimiento: string;
-  ultimaActualizacion: string;
-  rutina?: Record<string, { ejercicio: string; peso: string }[]>;
-}
-
-function Login() {
-  const [dni, setDni] = useState("");
-  const navigate = useNavigate();
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    navigate(`/cliente/${dni}`);
-  };
-
-  return (
-    <div className="h-screen bg-[#0f1c3f] flex flex-col items-center justify-center text-white">
-      <h1 className="text-2xl mb-6">INGRESE SU DNI PARA INICIAR SESIÓN</h1>
-      <form
-        onSubmit={handleSubmit}
-        className="flex flex-col gap-4 items-center"
-      >
-        <input
-          type="text"
-          placeholder="DNI"
-          value={dni}
-          onChange={(e) => setDni(e.target.value)}
-          className="p-3 rounded text-black w-64"
-          required
-        />
-        <button
-          type="submit"
-          className="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded text-white"
-        >
-          Entrar
-        </button>
-      </form>
-    </div>
-  );
-}
-
-function ClienteView() {
-  const { dni } = useParams<{ dni: string }>();
-  const [cliente, setCliente] = useState<Cliente | null>(null);
-  const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    const fetchCliente = async () => {
-      setLoading(true);
-      try {
-        if (!dni) return;
-
-        // 🔍 Buscar el cliente en TODAS las subcolecciones "clientes"
-        const q = query(collectionGroup(db, "clientes"), where("dni", "==", dni.trim()));
-        const snapshot = await getDocs(q);
-
-        if (!snapshot.empty) {
-          const clienteDoc = snapshot.docs[0];
-          const clienteData = clienteDoc.data() as Cliente;
-
-          // 🔍 Buscar rutinas en la subcolección del cliente encontrado
-          const rutinasRef = collection(clienteDoc.ref, "rutinas");
-          const rutinasSnap = await getDocs(rutinasRef);
-
-          if (!rutinasSnap.empty) {
-            const rutinaData: Record<string, { ejercicio: string; peso: string }[]> = {};
-            rutinasSnap.forEach((doc) => {
-              rutinaData[doc.id] = doc.data().ejercicios || [];
-            });
-            clienteData.rutina = rutinaData;
-          }
-
-          setCliente(clienteData);
-        } else {
-          setCliente(null);
-        }
-      } catch (error) {
-        console.error("❌ Error cargando cliente:", error);
-        setCliente(null);
-      }
-      setLoading(false);
-    };
-
-    fetchCliente();
-  }, [dni]);
-
-  if (loading) return <p className="p-6 text-center">Cargando...</p>;
-
-  if (!cliente)
-    return (
-      <div className="h-screen flex flex-col items-center justify-center">
-        <p>No se encontró un cliente con el DNI {dni}</p>
-        <button
-          onClick={() => navigate("/")}
-          className="mt-4 bg-gray-400 hover:bg-gray-500 px-4 py-2 rounded text-white"
-        >
-          Volver
-        </button>
-      </div>
-    );
-
-  // Calcular días restantes
-  const hoy = new Date();
-  const [anio, mes, dia] = cliente.fechaVencimiento.split("-").map(Number);
-  const vencimiento = new Date(anio, mes - 1, dia);
-  const diffMs = vencimiento.getTime() - hoy.getTime();
-  const diasRestantes = Math.max(Math.floor(diffMs / (1000 * 60 * 60 * 24)), 0);
-
-  return (
-    <div className="bg-gray-100 min-h-screen">
-      <header className="bg-[#0f1c3f] text-white p-4 flex justify-between items-center">
-        <h1 className="font-bold">Hola {cliente.nombre}</h1>
-        <span>{cliente.dias.length} veces x semana</span>
-      </header>
-
-      <div className="bg-white shadow m-4 p-4 rounded">
-        <p className="font-semibold text-green-600">
-          Días restantes: {diasRestantes}
-        </p>
-        <p className="text-gray-600">Plan: {cliente.dias.join(" - ")}</p>
-      </div>
-
-      <div className="m-4">
-        {["L", "M", "X", "J", "V", "S", "D"].map((claveDia, idx) => (
-          <details key={idx} className="mb-2 bg-white shadow rounded">
-            <summary className="cursor-pointer px-4 py-2 font-semibold bg-gray-200">
-              {["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"][idx]}
-            </summary>
-            <div className="p-4">
-              {cliente.rutina && cliente.rutina[claveDia] ? (
-                <ul>
-                  {cliente.rutina[claveDia].map((ej, i) => (
-                    <li key={i} className="flex justify-between border-b py-1">
-                      <span>{ej.ejercicio}</span>
-                      <span>{ej.peso}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-gray-500">Sin ejercicios asignados</p>
-              )}
-            </div>
-          </details>
-        ))}
-      </div>
-
-      <div className="text-center my-4">
-        <button
-          onClick={() => navigate("/")}
-          className="bg-gray-400 hover:bg-gray-500 px-4 py-2 rounded text-white"
-        >
-          Volver
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function App() {
+export default function App() {
   return (
     <Router>
-      <Routes>
-        <Route path="/" element={<Login />} />
-        <Route path="/cliente/:dni" element={<ClienteView />} />
-      </Routes>
+      <div className="min-h-screen flex flex-col bg-gray-100">
+        {/* Header visible en todas las páginas */}
+        <Header />
+
+        {/* Contenido principal */}
+        <main className="flex-1">
+          <Routes>
+            <Route path="/gym-manager/" element={<Login />} />
+            <Route path="/cliente/:dni" element={<ClienteView />} />
+          </Routes>
+        </main>
+
+        {/* Footer visible en todas las páginas */}
+        <Footer />
+      </div>
     </Router>
   );
 }
-
-export default App;

@@ -1,0 +1,16 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Redirigir automáticamente al login en /gym-manager/ cuando accedan al raíz
+  RewriteCond %{REQUEST_URI} ^/$
+  RewriteRule ^$ /gym-manager/ [L,R=302]
+
+  # Permitir que React Router maneje las rutas en /gym-manager
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^gym-manager/ /index.html [L]
+</IfModule>
+
+# Opcional: evitar listado de directorios
+Options -Indexes
