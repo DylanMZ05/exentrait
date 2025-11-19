@@ -6,7 +6,7 @@ export default function Footer() {
   return (
     <footer className="bg-[#0b0c1a] py-6 px-6 shadow-md">
       <div className="flex items-center">
-        <Link to="/gym-manager/">
+        <Link to="/">
           <img
             src={logo}
             alt="Exentra Logo"

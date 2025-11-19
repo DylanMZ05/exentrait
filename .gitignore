@@ -7,18 +7,53 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencias
 node_modules
+
+# Builds
 dist
 dist-ssr
 *.local
 
-# Editor directories and files
+# Archivos de producción de Electron (instaladores y updates)
+public/updates/*
+!public/updates/.gitkeep
+
+# Imágenes grandes de ejercicios (no versionarlas)
+public/exercises/assets/*.webp
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+
+# Configuración de editores
 .vscode/*
 !.vscode/extensions.json
 .idea
-.DS_Store
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+
+# Archivos de entorno
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Coverage / tests
+coverage
+*.lcov
+
+# Archivos generados por Electron Builder / instaladores grandes
+*.exe
+*.dmg
+*.AppImage
+*.blockmap
+latest.yml
+builder-debug.yml
+builder-effective-config.yaml
+*.msi
+*.pkg

@@ -1,0 +1,58 @@
+# ================================
+# backend/.htaccess  (Apache)
+# ================================
+
+# 1) Seguridad básica
+#    - Sin listado de directorios
+#    - Bloquear archivos sensibles y dotfiles
+Options -Indexes
+
+# Bloquea acceso directo a archivos sensibles
+<FilesMatch "(?i)^(serviceAccountKey\.json|\.env|composer\.(json|lock)|mp\.log)$">
+  Require all denied
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>
+
+# Bloquear dotfiles (.git, .htaccess, etc.)
+<FilesMatch "^\.(.*)$">
+  Require all denied
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>
+
+# 2) Charset por defecto
+AddDefaultCharset UTF-8
+
+# 3) CORS (necesario para llamadas desde Electron / apps)
+<IfModule mod_headers.c>
+  Header always set Access-Control-Allow-Origin "*"
+  Header always set Access-Control-Allow-Methods "GET, POST, OPTIONS"
+  Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With, X-Signature"
+  # Si usás cookies/credenciales entre dominios, cambiá a:
+  # Header always set Access-Control-Allow-Credentials "true"
+</IfModule>
+
+# 4) Responder rápido a preflight OPTIONS
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Si la solicitud es OPTIONS, devolvemos 204 No Content
+  RewriteCond %{REQUEST_METHOD} =OPTIONS
+  RewriteRule ^ - [R=204,L]
+</IfModule>
+
+# 5) Desactivar cache agresiva para evitar problemas en pruebas (opcional)
+#<IfModule mod_headers.c>
+#  Header always set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+#  Header always set Pragma "no-cache"
+#  Header always set Expires "0"
+#</IfModule>
+
+# 6) Protecciones extra (opcionales, según hosting)
+#FileETag None
+#ServerSignature Off
