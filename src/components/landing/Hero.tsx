@@ -24,7 +24,7 @@ export default function Hero({
 
           <div className="mt-7">
             <a
-              href="/updates/Exentra-Gym-Setup-1.0.29-x64.exe" download
+              href="/updates/Exentra-Gym-Setup-1.0.30-x64.exe" download
               className="inline-flex items-center rounded-md bg-emerald-600 px-5 py-3 text-white font-semibold shadow-sm hover:bg-emerald-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
             >
               Descargar la aplicación

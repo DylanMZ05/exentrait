@@ -10,7 +10,7 @@ interface DownloadStripProps {
 
 // Mismo archivo que usás en el Hero; encodeURI evita problemas por espacios.
 const DEFAULT_INSTALLER = encodeURI(
-  "/updates/Exentra-Gym-Setup-1.0.29-x64.exe"
+  "/updates/Exentra-Gym-Setup-1.0.30-x64.exe"
 );
 
 export default function DownloadStrip({

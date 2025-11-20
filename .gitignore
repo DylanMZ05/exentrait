@@ -15,12 +15,13 @@ dist
 dist-ssr
 *.local
 
+# Evitar backend completo
+backend/
+backend/*
+
 # Archivos de producción de Electron (instaladores y updates)
 public/updates/*
 !public/updates/.gitkeep
-
-# Imágenes grandes de ejercicios (no versionarlas)
-public/exercises/assets/*.webp
 
 # Archivos del sistema
 .DS_Store
@@ -47,7 +48,7 @@ Thumbs.db
 coverage
 *.lcov
 
-# Archivos generados por Electron Builder / instaladores grandes
+# Archivos generados por Electron Builder
 *.exe
 *.dmg
 *.AppImage
@@ -55,5 +56,3 @@ coverage
 latest.yml
 builder-debug.yml
 builder-effective-config.yaml
-*.msi
-*.pkg
