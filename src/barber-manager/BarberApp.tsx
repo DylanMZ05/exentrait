@@ -7,13 +7,15 @@ import {
   useLocation,
 } from "react-router-dom";
 
+// Components
 import { BarberHeader } from "./components/BarberHeader";
-import { Dashboard } from "./pages/Dashboard";
+import { RequireBarberAuth } from "./RequireBarberAuth";
+
+// Pages
 import { Login as BarberLogin } from "./pages/Login";
-
-// Nuevas páginas Barber Manager
-
+import { Dashboard } from "./pages/Dashboard";
 import { Empleados } from "./pages/Empleados";
+import { Clientes } from "./pages/Clientes";
 
 export const BarberApp: React.FC = () => {
   const location = useLocation();
@@ -28,21 +30,33 @@ export const BarberApp: React.FC = () => {
       {!isLoginRoute && <BarberHeader />}
 
       {/* pt-16 porque el header es fijo */}
-      <div className={`flex-1 ${!isLoginRoute ? "pt-16" : ""}`}>
+      <div className={`flex-1 ${!isLoginRoute ? "" : ""}`}>
         <Routes>
 
-          {/* ========= LOGIN ========= */}
+          {/* ========= LOGIN (Pública) ========= */}
           <Route path="login" element={<BarberLogin />} />
 
-          {/* ========= PANEL PRINCIPAL ========= */}
-          <Route path="dashboard" element={<Dashboard />} />
+          {/* ========= RUTAS PROTEGIDAS ========= */}
+          <Route element={<RequireBarberAuth />}>
+            
+            <Route path="dashboard" element={<Dashboard />} />
+            
+            <Route path="empleados" element={<Empleados />} />
+            
+            <Route path="clientes" element={<Clientes />} />
 
-          {/* ========= EMPLEADOS ========= */}
-          <Route path="empleados" element={<Empleados />} />
+          </Route>
 
-          {/* ========= DEFAULT ========= */}
-          <Route path="" element={<Navigate to="dashboard" replace />} />
-          <Route path="*" element={<Navigate to="dashboard" replace />} />
+          {/* ========= DEFAULT / CATCH-ALL ========= */}
+          {/* 🔥 CORRECCIÓN CRÍTICA: Usamos rutas ABSOLUTAS (con / al principio) */}
+          <Route 
+            path="" 
+            element={<Navigate to="/barber-manager/dashboard" replace />} 
+          />
+          <Route 
+            path="*" 
+            element={<Navigate to="/barber-manager/dashboard" replace />} 
+          />
 
         </Routes>
       </div>

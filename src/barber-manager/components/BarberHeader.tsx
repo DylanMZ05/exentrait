@@ -1,3 +1,4 @@
+// src/barber-manager/components/BarberHeader.tsx
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { signOut } from "firebase/auth";
@@ -110,7 +111,7 @@ export const BarberHeader: React.FC = () => {
   const location = useLocation();
 
   const [menuOpen, setMenuOpen] = useState(false);
-  const [isHidden, setIsHidden] = useState(false);
+  // NOTA: Se eliminó el estado isHidden para mantener el header siempre visible (sticky)
 
   const menuRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
@@ -118,53 +119,36 @@ export const BarberHeader: React.FC = () => {
   const today = new Date();
   const formattedDate = today.toLocaleDateString("es-AR");
 
+  // Detecta en qué sección estamos para mostrar el título
   const getSectionTitle = () => {
-    if (location.pathname.includes("dashboard")) return "Panel general";
-    if (location.pathname.includes("clientes")) return "Clientes";
-    if (location.pathname.includes("turnos")) return "Turnos";
-    if (location.pathname.includes("empleados")) return "Empleados";
+    const path = location.pathname;
+    if (path.includes("dashboard")) return "Panel general";
+    if (path.includes("clientes")) return "Clientes"; 
+    if (path.includes("turnos")) return "Turnos";     
+    if (path.includes("empleados")) return "Empleados"; 
     return "Panel general";
   };
 
   const toggleMenu = () => setMenuOpen((prev) => !prev);
 
-  const goTo = (path: string) => navigate(path);
+  // Función de navegación segura
+  const goTo = (path: string) => {
+    navigate(path);
+    setMenuOpen(false); // Cierra el menú automáticamente al navegar
+  };
 
   const handleLogout = async () => {
-    await signOut(barberAuth);
-    setMenuOpen(false);
-    navigate("/barber-manager/login", { replace: true });
+    try {
+      await signOut(barberAuth);
+      setMenuOpen(false);
+      navigate("/barber-manager/login", { replace: true });
+    } catch (error) {
+      console.error("Error al cerrar sesión", error);
+    }
   };
 
   /* ======================================
-     1) CERRAR MENÚ AL HACER SCROLL
-  ======================================= */
-  useEffect(() => {
-    let lastY = window.scrollY;
-
-    const handleScroll = () => {
-      const currentY = window.scrollY;
-
-      // Ocultar header al bajar
-      if (currentY > lastY + 10 && currentY > 80) {
-        setIsHidden(true);
-        setMenuOpen(false); // cerrar menú si estaba abierto
-      }
-
-      // Mostrar header al subir
-      if (currentY < lastY - 10) {
-        setIsHidden(false);
-      }
-
-      lastY = currentY;
-    };
-
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
-
-  /* ======================================
-     2) CERRAR MENÚ AL HACER CLICK FUERA
+     1) CERRAR MENÚ AL HACER CLICK FUERA
   ======================================= */
   useEffect(() => {
     if (!menuOpen) return;
@@ -178,7 +162,7 @@ export const BarberHeader: React.FC = () => {
         buttonRef.current &&
         !buttonRef.current.contains(target)
       ) {
-        setMenuOpen(false); // cerrar menú al tocar afuera
+        setMenuOpen(false);
       }
     };
 
@@ -190,11 +174,9 @@ export const BarberHeader: React.FC = () => {
      JSX
   ======================================= */
   return (
-    <header
-      className={`fixed top-0 left-0 right-0 z-40 bg-slate-900 text-white shadow-md transform transition-transform duration-200 ${
-        isHidden ? "-translate-y-full" : "translate-y-0"
-      }`}
-    >
+    // CAMBIO IMPORTANTE: 'sticky' en lugar de 'fixed'. 
+    // Ocupa espacio en el DOM y se queda pegado arriba al hacer scroll.
+    <header className="sticky top-0 z-40 bg-slate-900 text-white shadow-md">
       <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between relative">
         {/* LOGO */}
         <div className="flex items-center gap-3">
@@ -259,11 +241,8 @@ export const BarberHeader: React.FC = () => {
 
             <nav className="py-2">
               <button
-                onClick={() => {
-                  goTo("/barber-manager/dashboard");
-                  setMenuOpen(false); // cerrar menú al hacer click
-                }}
-                className="w-full px-4 py-2 text-left flex items-center gap-2 hover:bg-slate-800"
+                onClick={() => goTo("/barber-manager/dashboard")}
+                className="w-full px-4 py-2 text-left flex items-center gap-2 hover:bg-slate-800 transition-colors"
               >
                 <IconBox>
                   <IconDashboard />
@@ -272,11 +251,8 @@ export const BarberHeader: React.FC = () => {
               </button>
 
               <button
-                onClick={() => {
-                  goTo("/barber-manager/clientes");
-                  setMenuOpen(false); // cerrar menú al hacer click
-                }}
-                className="w-full px-4 py-2 flex items-center gap-2 text-left hover:bg-slate-800"
+                onClick={() => goTo("/barber-manager/clientes")}
+                className="w-full px-4 py-2 flex items-center gap-2 text-left hover:bg-slate-800 transition-colors"
               >
                 <IconBox>
                   <IconClients />
@@ -285,11 +261,8 @@ export const BarberHeader: React.FC = () => {
               </button>
 
               <button
-                onClick={() => {
-                  goTo("/barber-manager/turnos");
-                  setMenuOpen(false); // cerrar menú al hacer click
-                }}
-                className="w-full px-4 py-2 flex items-center gap-2 text-left hover:bg-slate-800"
+                onClick={() => goTo("/barber-manager/turnos")}
+                className="w-full px-4 py-2 flex items-center gap-2 text-left hover:bg-slate-800 transition-colors"
               >
                 <IconBox>
                   <IconCalendar />
@@ -298,11 +271,8 @@ export const BarberHeader: React.FC = () => {
               </button>
 
               <button
-                onClick={() => {
-                  goTo("/barber-manager/empleados");
-                  setMenuOpen(false); // cerrar menú al hacer click
-                }}
-                className="w-full px-4 py-2 flex items-center gap-2 text-left hover:bg-slate-800"
+                onClick={() => goTo("/barber-manager/empleados")}
+                className="w-full px-4 py-2 flex items-center gap-2 text-left hover:bg-slate-800 transition-colors"
               >
                 <IconBox>
                   <IconEmployees />
@@ -313,7 +283,7 @@ export const BarberHeader: React.FC = () => {
               <div className="border-t border-slate-700 mt-2 pt-2">
                 <button
                   onClick={handleLogout}
-                  className="w-full px-4 py-2 flex items-center gap-2 text-left text-red-300 hover:bg-red-600/20 hover:text-red-200"
+                  className="w-full px-4 py-2 flex items-center gap-2 text-left text-red-300 hover:bg-red-600/20 hover:text-red-200 transition-colors"
                 >
                   <span className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-red-900/40">
                     <IconLogout />

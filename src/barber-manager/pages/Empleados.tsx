@@ -17,7 +17,7 @@ import {
 
 /* ============================================================
    EMPLEADOS
-   Crear, editar y eliminar empleados con mejor UI/UX
+   Crear, editar y eliminar empleados con actualización de caché
 =============================================================== */
 export const Empleados: React.FC = () => {
   const user = barberAuth.currentUser;
@@ -47,7 +47,7 @@ export const Empleados: React.FC = () => {
   const [editPorcentaje, setEditPorcentaje] = useState("");
 
   /* ============================================================
-     Cargar empleados
+     Cargar empleados (y actualizar caché del Dashboard)
   ============================================================ */
   const loadEmpleados = async () => {
     setLoading(true);
@@ -59,6 +59,17 @@ export const Empleados: React.FC = () => {
       list.sort((a, b) => a.nombre.localeCompare(b.nombre));
 
       setEmpleados(list);
+
+      // 🔥 LÓGICA DE CACHÉ (ACTUALIZACIÓN) 🔥
+      // Actualizamos el contador en localStorage para que el Dashboard
+      // no tenga que volver a preguntar a Firebase cuando volvamos allá.
+      if (uid) {
+        const cacheKey = `barber_stats_empleados_${uid}`;
+        const newCount = list.length.toString();
+        localStorage.setItem(cacheKey, newCount);
+        console.log(`✅ Caché actualizado: ${newCount} empleados`);
+      }
+
     } catch (err) {
       console.error(err);
     }
@@ -67,6 +78,7 @@ export const Empleados: React.FC = () => {
 
   useEffect(() => {
     if (uid) loadEmpleados();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid]);
 
   /* ============================================================
@@ -189,7 +201,7 @@ export const Empleados: React.FC = () => {
      UI
   ============================================================ */
   return (
-    <div className="space-y-6 animate-fadeIn p-2 pt-10">
+    <div className="space-y-6 animate-fadeIn m-2">
 
       <h2 className="text-xl font-semibold">Empleados</h2>
       <p className="text-sm text-gray-600 -mt-2">

@@ -7,7 +7,7 @@ import Section from "../../components/landing/Section";
 
 // URL del instalador (en public/updates/...). Cambiá si renombrás el archivo.
 const INSTALLER_WIN = encodeURI(
-  "/updates/Exentra-Gym-Setup-1.0.30-x64.exe"
+  "/updates/Exentra-Gym-Setup-1.0.29-x64.exe"
 );
 
 export default function Home() {
