@@ -27,12 +27,7 @@ const IconAdd = () => (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
   </svg>
 );
-const IconList = () => (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
-    </svg>
-);
-// ... (Otros Iconos)
+// TS6133 CORREGIDO: IconList eliminado, ya que no se usa en Dashboard.tsx.
 
 const IconAlert = () => (
   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -149,11 +144,13 @@ export const Dashboard: React.FC = () => {
     confirmText: string;
     isDanger?: boolean;
   }>({ title: "", message: "", action: () => {}, confirmText: "", isDanger: false });
+  
 
   // Estado del turno para la acción rápida
-  const [turnoToAction, setTurnoToAction] = useState<Turno | null>(null);
-  // Se mantiene clientesList para la lógica de fetch (TS6133 ignorado)
-  const [clientesList, setClientesList] = useState<any[]>([]); 
+  // TS6133 CORREGIDO: Se ignora la advertencia, ya que se usa para mostrar el contexto del modal.
+  const [, setTurnoToAction] = useState<Turno | null>(null); 
+  // TS6133 CORREGIDO: Se ignora la advertencia, ya que se usa para almacenar datos en fetchDashboardData.
+  const [, setClientesList] = useState<any[]>([]); 
   const confirmModalRef = useRef<HTMLDivElement>(null);
 
   // ===============================================
@@ -399,7 +396,7 @@ export const Dashboard: React.FC = () => {
   ========================================================= */
 
   const handleClickOutsideConfirm = useCallback((event: MouseEvent) => { // Renombrado para evitar conflicto con handleClickOutsideModal
-    const modalElement = confirmModalRef.current;
+    const modalElement = confirmModalRef.current; // Usar confirmModalRef
     if (confirmOpen && modalElement && !modalElement.contains(event.target as Node)) {
       setConfirmOpen(false);
       setTurnoToAction(null);
@@ -623,7 +620,7 @@ export const Dashboard: React.FC = () => {
                                     {card.value}
                                 </p>
                             </div>
-                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${card.lowStock === null || card.lowStock === 0 ? 'bg-slate-100 text-slate-700' : 'bg-red-100 text-red-600'}`}>
+                            <div className={`w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-lg ${card.lowStock === null || card.lowStock === 0 ? 'bg-slate-100 text-slate-700' : 'bg-red-100 text-red-600'}`}>
                                 <IconAlert />
                             </div>
                         </div>
