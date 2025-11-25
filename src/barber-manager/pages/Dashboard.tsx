@@ -14,7 +14,7 @@ import {
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { useNavigate } from "react-router-dom"; 
-import { barberDb, barberAuth } from "../services/firebaseBarber"; // Ruta a verificar
+import { barberDb, barberAuth } from "../services/firebaseBarber"; 
 
 /* =========================================================
    ICONOS SVG (Autocontenido)
@@ -65,7 +65,7 @@ interface Turno {
   clientName: string;
   servicio: string;
   precio: string;
-  estado: string; // "pendiente" | "completado"
+  estado: string; // "pendiente" | "completado" | "cancelado"
   ventaId?: string;
 }
 interface Empleado {
@@ -105,7 +105,7 @@ const generateTimeSlots = () => {
   }
   return slots;
 };
-const TIME_SLOTS = generateTimeSlots(); // Solo usamos esto para la lista de turnos (visual)
+const TIME_SLOTS = generateTimeSlots(); 
 
 
 /* =========================================================
@@ -183,13 +183,11 @@ export const Dashboard: React.FC = () => {
 
 
       // --- 2. NETO DEL MES (VENTAS)
-      // Requiere índice en ventas: (createdAt ASC, tipo ASC)
       const qSales = query(
         collection(barberDb, `barber_users/${userUid}/ventas`),
         where('createdAt', '>=', Timestamp.fromDate(startOfMonth)),
         where('createdAt', '<', Timestamp.fromDate(startOfNextMonth)),
-        orderBy('createdAt', 'desc'), // Usamos solo uno para evitar error de índice
-        // orderBy('tipo', 'asc'), // Comentar si no existe índice compuesto
+        orderBy('createdAt', 'asc'), 
       );
       const salesSnap = await getDocs(qSales);
       let totalIngresos = 0;
@@ -206,11 +204,10 @@ export const Dashboard: React.FC = () => {
 
 
       // --- 3. TURNOS PROGRAMADOS (HOY)
-      // Requiere índice en turnos: (fecha ASC, estado ASC, hora ASC)
       const qTurnos = query(
         collection(barberDb, `barber_users/${userUid}/turnos`),
         where('fecha', '==', todayDateStr),
-        where('estado', '!=', 'cancelado'),
+        where('estado', '!=', 'cancelado'), // Excluir cancelados
         orderBy('estado'), 
         orderBy('hora')
       );
@@ -219,9 +216,11 @@ export const Dashboard: React.FC = () => {
       setTodayTurnos(turnosList);
       setTotalTurnosHoy(turnosList.length);
 
+      // 🔥 DEBUG: Muestra los turnos que Firebase devolvió para hoy.
+      console.log(`[Turnos Hoy: ${todayDateStr}]`, turnosList);
+
 
       // --- 4. ACTIVIDAD RECIENTE (ÚLTIMAS VENTAS/GASTOS)
-      // Requiere índice en ventas: (createdAt DESC)
       const qRecent = query(
         collection(barberDb, `barber_users/${userUid}/ventas`),
         orderBy('createdAt', 'desc')
