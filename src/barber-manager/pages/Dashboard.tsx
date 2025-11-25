@@ -1,15 +1,59 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { 
   collection, 
   getDocs, 
   query, 
   where, 
   orderBy, 
-  Timestamp 
+  Timestamp,
+  doc,
+  updateDoc,
+  deleteDoc,
+  addDoc,
+  increment,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
-import { useNavigate } from "react-router-dom"; // Para el botón de Venta Rápida
-import { barberDb, barberAuth } from "../services/firebaseBarber";
+import { useNavigate } from "react-router-dom"; 
+import { barberDb, barberAuth } from "../services/firebaseBarber"; // Ruta a verificar
+
+/* =========================================================
+   ICONOS SVG (Autocontenido)
+========================================================= */
+
+const IconAdd = () => (
+  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+  </svg>
+);
+
+const IconAlert = () => (
+  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.45-1.74 1.54-3.04L13.54 4.04c-.91-1.3-2.37-1.3-3.28 0L3.54 17.96c-.91 1.3.003 3.04 1.54 3.04z" />
+  </svg>
+);
+
+const IconAlertModal = () => (
+  <svg className="w-10 h-10 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+  </svg>
+);
+
+const IconCheck = () => (
+  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+  </svg>
+);
+
+const IconTrash = () => (
+  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+  </svg>
+);
+
+
+/* =========================================================
+   TIPADOS Y HELPERS
+========================================================= */
 
 // Tipados (Simplificados)
 interface Turno {
@@ -17,9 +61,12 @@ interface Turno {
   hora: string;
   barberId: string;
   barberName: string;
+  clientId: string;
   clientName: string;
   servicio: string;
+  precio: string;
   estado: string; // "pendiente" | "completado"
+  ventaId?: string;
 }
 interface Empleado {
   id: string;
@@ -38,9 +85,6 @@ interface Producto {
 }
 
 
-/* =========================================================
-   HELPER: Formatear moneda y Fechas
-========================================================= */
 const formatCurrency = (amount: number) => {
   return `$ ${Math.abs(amount).toLocaleString("es-AR", { minimumFractionDigits: 0 })}`;
 };
@@ -52,7 +96,6 @@ const formatDateToInput = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
-// Generar horarios (mismo helper que en Turnos.tsx)
 const generateTimeSlots = () => {
   const slots = [];
   for (let i = 9; i <= 20; i++) {
@@ -62,23 +105,8 @@ const generateTimeSlots = () => {
   }
   return slots;
 };
-const TIME_SLOTS = generateTimeSlots();
+const TIME_SLOTS = generateTimeSlots(); // Solo usamos esto para la lista de turnos (visual)
 
-/* =========================================================
-   ICONOS SVG
-========================================================= */
-
-const IconAdd = () => (
-  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-  </svg>
-);
-
-const IconAlert = () => (
-  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.45-1.74 1.54-3.04L13.54 4.04c-.91-1.3-2.37-1.3-3.28 0L3.54 17.96c-.91 1.3.003 3.04 1.54 3.04z" />
-  </svg>
-);
 
 /* =========================================================
    COMPONENTE PRINCIPAL
@@ -92,10 +120,10 @@ export const Dashboard: React.FC = () => {
   const [totalClientes, setTotalClientes] = useState<number | null>(null);
   const [totalIngresosMes, setTotalIngresosMes] = useState<number | null>(null);
   const [totalTurnosHoy, setTotalTurnosHoy] = useState<number | null>(null);
-  const [lowStockCount, setLowStockCount] = useState<number | null>(null); // NUEVO
+  const [lowStockCount, setLowStockCount] = useState<number | null>(null); 
 
   // List States
-  const [empleadosList, setEmpleadosList] = useState<Empleado[]>([]); // Necesario para filtros
+  const [empleadosList, setEmpleadosList] = useState<Empleado[]>([]); 
   const [todayTurnos, setTodayTurnos] = useState<Turno[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<Venta[]>([]);
   const [loadingLists, setLoadingLists] = useState(true);
@@ -105,11 +133,25 @@ export const Dashboard: React.FC = () => {
   
   const todayDateStr = formatDateToInput(new Date());
 
+  // Modales y confirmación
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmConfig, setConfirmConfig] = useState<{
+    title: string;
+    message: string;
+    action: () => void;
+    confirmText: string;
+    isDanger?: boolean;
+  }>({ title: "", message: "", action: () => {}, confirmText: "", isDanger: false });
+
+  // Estado del turno para la acción rápida
+  const [turnoToAction, setTurnoToAction] = useState<Turno | null>(null);
+  const [clientesList, setClientesList] = useState<any[]>([]); // Lista completa de clientes para lógica de fidelidad
+  const confirmModalRef = useRef<HTMLDivElement>(null);
+
   /* =========================================================
      FETCH DATA LOGIC
   ========================================================= */
 
-  // Lógica principal de carga de datos del Dashboard
   const fetchDashboardData = async (userUid: string) => {
     setLoadingLists(true);
     const today = new Date();
@@ -117,29 +159,37 @@ export const Dashboard: React.FC = () => {
     const startOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
 
     try {
-      // --- 1. Empleados/Clientes (Cache-First para conteo)
+      // --- 1. Empleados/Clientes/Stock (Carga de listas)
       
-      // EMPLEADOS
-      const empCacheKey = `barber_stats_empleados_${userUid}`;
       const empSnap = await getDocs(collection(barberDb, `barber_users/${userUid}/empleados`));
       const empList = empSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Empleado));
       setTotalEmpleados(empList.length);
       setEmpleadosList(empList);
-      localStorage.setItem(empCacheKey, empList.length.toString());
 
-      // CLIENTES
-      const cliCacheKey = `barber_stats_clientes_${userUid}`;
       const cliSnap = await getDocs(collection(barberDb, `barber_users/${userUid}/clientes`));
+      const cliList = cliSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setTotalClientes(cliSnap.size);
-      localStorage.setItem(cliCacheKey, cliSnap.size.toString());
+      setClientesList(cliList); 
+
+      const stockSnap = await getDocs(collection(barberDb, `barber_users/${userUid}/stock`));
+      let lowStock = 0;
+      stockSnap.forEach(doc => {
+        const data = doc.data() as Producto;
+        if (data.cantidadActual <= data.stockBajo) {
+          lowStock++;
+        }
+      });
+      setLowStockCount(lowStock);
 
 
-      // --- 2. INGRESOS DEL MES (VENTAS)
-      // Nota: Si hay errores de índice, es probable que estas queries fallen
+      // --- 2. NETO DEL MES (VENTAS)
+      // Requiere índice en ventas: (createdAt ASC, tipo ASC)
       const qSales = query(
         collection(barberDb, `barber_users/${userUid}/ventas`),
-        where('createdAt', '>=', startOfMonth),
-        where('createdAt', '<', startOfNextMonth)
+        where('createdAt', '>=', Timestamp.fromDate(startOfMonth)),
+        where('createdAt', '<', Timestamp.fromDate(startOfNextMonth)),
+        orderBy('createdAt', 'desc'), // Usamos solo uno para evitar error de índice
+        // orderBy('tipo', 'asc'), // Comentar si no existe índice compuesto
       );
       const salesSnap = await getDocs(qSales);
       let totalIngresos = 0;
@@ -155,24 +205,13 @@ export const Dashboard: React.FC = () => {
       setTotalIngresosMes(totalIngresos - totalGastos);
 
 
-      // --- 3. PRODUCTOS EN STOCK BAJO (STOCK)
-      const stockSnap = await getDocs(collection(barberDb, `barber_users/${userUid}/stock`));
-      let lowStock = 0;
-      stockSnap.forEach(doc => {
-        const data = doc.data() as Producto;
-        if (data.cantidadActual <= data.stockBajo) {
-          lowStock++;
-        }
-      });
-      setLowStockCount(lowStock);
-
-
-      // --- 4. TURNOS PROGRAMADOS (HOY)
+      // --- 3. TURNOS PROGRAMADOS (HOY)
+      // Requiere índice en turnos: (fecha ASC, estado ASC, hora ASC)
       const qTurnos = query(
         collection(barberDb, `barber_users/${userUid}/turnos`),
         where('fecha', '==', todayDateStr),
         where('estado', '!=', 'cancelado'),
-        orderBy('estado'), // Para ordenar completados al final
+        orderBy('estado'), 
         orderBy('hora')
       );
       const turnosSnap = await getDocs(qTurnos);
@@ -181,7 +220,8 @@ export const Dashboard: React.FC = () => {
       setTotalTurnosHoy(turnosList.length);
 
 
-      // --- 5. ACTIVIDAD RECIENTE (ÚLTIMAS VENTAS/GASTOS)
+      // --- 4. ACTIVIDAD RECIENTE (ÚLTIMAS VENTAS/GASTOS)
+      // Requiere índice en ventas: (createdAt DESC)
       const qRecent = query(
         collection(barberDb, `barber_users/${userUid}/ventas`),
         orderBy('createdAt', 'desc')
@@ -201,14 +241,12 @@ export const Dashboard: React.FC = () => {
     const unsubscribe = onAuthStateChanged(barberAuth, (user) => {
       if (user) {
         setUid(user.uid);
-        // Carga de datos que se benefician del cache-first pattern (empleados, clientes)
+        // Carga de datos que se benefician del cache-first pattern
         const empCachedData = localStorage.getItem(`barber_stats_empleados_${user.uid}`);
         if (empCachedData) setTotalEmpleados(Number(empCachedData));
-        
         const cliCachedData = localStorage.getItem(`barber_stats_clientes_${user.uid}`);
         if (cliCachedData) setTotalClientes(Number(cliCachedData));
         
-        // Cargar todos los datos dinámicos
         fetchDashboardData(user.uid);
       } else {
         setUid(null);
@@ -221,38 +259,121 @@ export const Dashboard: React.FC = () => {
 
 
   /* =========================================================
+     GESTIÓN DE MODAL Y CLICK-OUTSIDE
+  ========================================================= */
+  const handleClickOutside = useCallback((event: MouseEvent) => {
+    const modalElement = confirmModalRef.current;
+    if (confirmOpen && modalElement && !modalElement.contains(event.target as Node)) {
+      setConfirmOpen(false);
+      setTurnoToAction(null);
+    }
+  }, [confirmOpen]);
+
+  useEffect(() => {
+    if (confirmOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    } else {
+      document.removeEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [confirmOpen, handleClickOutside]);
+
+  /* =========================================================
+     ACCIONES RÁPIDAS (Finalizar/Cancelar Turno)
+  ========================================================= */
+
+  const triggerConfirm = (title: string, message: string, confirmText: string, isDanger: boolean, action: () => void) => {
+    setConfirmConfig({ title, message, confirmText, isDanger, action });
+    setConfirmOpen(true);
+  };
+
+  const handleQuickFinalize = (turno: Turno) => {
+    setTurnoToAction(turno);
+    triggerConfirm(
+      "Confirmar Asistencia",
+      `¿Deseas finalizar el turno de ${turno.clientName} (${turno.servicio})? Esto registrará la venta y sumará puntos de fidelidad.`,
+      "Sí, finalizar",
+      false, 
+      async () => {
+        if (!uid || !turnoToAction) return;
+        try {
+            // 1. CREAR DOCUMENTO DE VENTA
+            const ventaRef = await addDoc(collection(barberDb, `barber_users/${uid}/ventas`), {
+                monto: Number(turnoToAction.precio),
+                descripcion: `Venta - Turno: ${turnoToAction.servicio} de ${turnoToAction.clientName}`,
+                tipo: 'Ingreso',
+                date: todayDateStr, 
+                createdAt: serverTimestamp(),
+            });
+
+            // 2. ACTUALIZAR TURNO (Estado y ventaId)
+            await updateDoc(doc(barberDb, `barber_users/${uid}/turnos/${turnoToAction.id}`), {
+                estado: "completado",
+                ventaId: ventaRef.id, 
+            });
+
+            // 3. SUMAR PUNTO DE FIDELIDAD
+            if (turnoToAction.clientId) {
+                const clientRef = doc(barberDb, `barber_users/${uid}/clientes/${turnoToAction.clientId}`);
+                await updateDoc(clientRef, { cortes: increment(1) });
+            }
+            
+            setConfirmOpen(false);
+            setTurnoToAction(null);
+            fetchDashboardData(uid!); // Refrescar el Dashboard
+        } catch (e) {
+            console.error("Error al finalizar turno rápido", e);
+            alert("Error al finalizar turno.");
+        }
+      }
+    );
+  };
+
+  const handleQuickCancel = (turno: Turno) => {
+    setTurnoToAction(turno);
+    triggerConfirm(
+      "Cancelar Turno",
+      `¿Estás seguro de cancelar el turno de ${turno.clientName} (${turno.servicio})?`,
+      "Sí, cancelar",
+      true, 
+      async () => {
+        if (!uid || !turnoToAction) return;
+        try {
+            // Eliminar el turno
+            await deleteDoc(doc(barberDb, `barber_users/${uid}/turnos/${turnoToAction.id}`));
+            
+            setConfirmOpen(false);
+            setTurnoToAction(null);
+            fetchDashboardData(uid!); // Refrescar el Dashboard
+        } catch (e) {
+            console.error("Error al cancelar turno rápido", e);
+            alert("Error al cancelar turno.");
+        }
+      }
+    );
+  };
+
+
+  /* =========================================================
      RENDER HELPERS
   ========================================================= */
 
   const getFilteredTurnos = useMemo(() => {
+    // Obtenemos solo los turnos PENDIENTES
+    const pendingTurnos = todayTurnos.filter(t => t.estado === 'pendiente');
+    
     if (selectedBarberId === 'all') {
-      return todayTurnos;
+      // Ordenamos por hora para la visualización
+      return pendingTurnos.sort((a, b) => a.hora.localeCompare(b.hora));
     }
-    return todayTurnos.filter(t => t.barberId === selectedBarberId);
+    return pendingTurnos
+      .filter(t => t.barberId === selectedBarberId)
+      .sort((a, b) => a.hora.localeCompare(b.hora));
   }, [todayTurnos, selectedBarberId]);
   
-  // Combina slots de tiempo libres y ocupados para el renderizado
   const timelineAppointments = useMemo(() => {
-    const appointments: any[] = [];
-    const filteredTurnosMap = new Map(getFilteredTurnos.map(t => [t.hora, t]));
-
-    TIME_SLOTS.forEach(time => {
-      const turno = filteredTurnosMap.get(time);
-      if (turno) {
-        appointments.push({
-          ...turno,
-          hour: time,
-          type: 'reserved',
-        });
-      } else {
-        appointments.push({
-          id: time,
-          hour: time,
-          type: 'free',
-        });
-      }
-    });
-    return appointments;
+    // Usamos los turnos pendientes filtrados y ordenados para la lista de acción rápida
+    return getFilteredTurnos;
   }, [getFilteredTurnos]);
 
   const summaryCards = [
@@ -276,9 +397,9 @@ export const Dashboard: React.FC = () => {
       color: totalIngresosMes !== null ? (totalIngresosMes >= 0 ? 'text-emerald-600' : 'text-red-600') : 'text-slate-900'
     },
     {
-      label: "TURNOS HOY",
-      value: totalTurnosHoy === null ? "-" : totalTurnosHoy,
-      helper: "Turnos agendados para el día",
+      label: "TURNOS PENDIENTES",
+      value: totalTurnosHoy === null ? "-" : todayTurnos.filter(t => t.estado === 'pendiente').length, // Solo pendientes
+      helper: "Pendientes de confirmar hoy",
       icon: "📅"
     },
   ];
@@ -334,8 +455,8 @@ export const Dashboard: React.FC = () => {
             </p>
         </div>
         
-        {/* Dynamic Cards (excluding the first slot) */}
-        {summaryCards.slice(0, 3).map((card, index) => (
+        {/* Dynamic Cards */}
+        {summaryCards.slice(0, 3).map((card) => (
           <div
             key={card.label}
             className="bg-white rounded-2xl shadow-sm border border-slate-200 px-5 py-4 flex flex-col justify-between"
@@ -359,7 +480,7 @@ export const Dashboard: React.FC = () => {
           </div>
         ))}
 
-        {/* Turnos Card (last slot) */}
+        {/* Turnos Card (Pendientes) */}
         <div
             key={summaryCards[3].label}
             className="bg-white rounded-2xl shadow-sm border border-slate-200 px-5 py-4 flex flex-col justify-between"
@@ -393,7 +514,7 @@ export const Dashboard: React.FC = () => {
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-500" />
               <h3 className="text-sm font-semibold text-slate-900">
-                Actividad reciente (Ventas)
+                Actividad reciente (Ventas/Gastos)
               </h3>
             </div>
 
@@ -406,7 +527,7 @@ export const Dashboard: React.FC = () => {
             {loadingLists ? (
                 <div className="text-center py-12 text-sm text-slate-500">Cargando actividad...</div>
             ) : recentTransactions.length === 0 ? (
-                <div className="text-center py-12 text-sm text-slate-400">No hay ventas recientes.</div>
+                <div className="text-center py-12 text-sm text-slate-400">No hay transacciones recientes.</div>
             ) : (
                 <div className="px-5 py-3 space-y-2">
                     {recentTransactions.map((item, index) => {
@@ -448,11 +569,11 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Upcoming appointments */}
+        {/* Upcoming appointments (Quick Action List) */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col h-[460px]">
           <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
             <h3 className="text-sm font-semibold text-slate-900">
-              Próximos turnos ({todayDateStr})
+              Acciones Rápidas - Turnos Pendientes
             </h3>
             
             <div className="flex items-center gap-2 text-xs">
@@ -473,51 +594,94 @@ export const Dashboard: React.FC = () => {
           <div className="flex-1 overflow-y-auto custom-scrollbar px-5 py-3 space-y-3">
             {loadingLists ? (
                  <div className="text-center py-12 text-sm text-slate-500">Cargando turnos...</div>
-            ) : getFilteredTurnos.length === 0 ? (
-                <div className="text-center py-12 text-sm text-slate-400">No hay turnos para {selectedBarberId === 'all' ? 'hoy' : 'este barbero'}.</div>
+            ) : timelineAppointments.length === 0 ? (
+                <div className="text-center py-12 text-sm text-slate-400">No hay turnos pendientes para {selectedBarberId === 'all' ? 'hoy' : 'este barbero'}.</div>
             ) : (
                 <>
-                    {timelineAppointments.map((slot) => {
-                        const isReserved = slot.type === 'reserved';
-                        const isCompleted = slot.estado === "completado";
-                        
-                        return (
-                            <div key={slot.hour} className="space-y-1">
-                                <p className={`text-[11px] font-medium ${isReserved ? 'text-emerald-600' : 'text-slate-400'}`}>
-                                    {slot.hour}
+                    {timelineAppointments.map((turno) => (
+                        <div key={turno.id} className="border border-slate-100 rounded-xl px-3 py-2 hover:border-slate-200 hover:bg-slate-50 transition flex justify-between items-center">
+                            <div>
+                                <p className="text-[11px] font-medium text-slate-600">
+                                    {turno.hora}
                                 </p>
-                                <div className={`border rounded-xl px-3 py-2 transition ${isReserved ? 'border-emerald-200 hover:bg-emerald-50/30' : 'border-slate-100 hover:bg-slate-50'}`}>
-                                    {isReserved ? (
-                                        <>
-                                            <div className="flex items-center justify-between">
-                                                <p className="text-sm font-semibold text-slate-900">
-                                                    {slot.clientName}
-                                                </p>
-                                                <p className={`text-xs ${isCompleted ? 'text-emerald-500 font-medium' : 'text-slate-500'}`}>
-                                                    {isCompleted ? 'COMPLETADO' : 'PENDIENTE'}
-                                                </p>
-                                            </div>
-                                            <p className="text-xs text-slate-500">
-                                                {slot.servicio} · Barber:{" "}
-                                                <span className="font-medium text-slate-800">
-                                                    {slot.barberName}
-                                                </span>
-                                            </p>
-                                        </>
-                                    ) : (
-                                        <p className="text-sm font-semibold text-slate-400">
-                                            LIBRE
-                                        </p>
-                                    )}
-                                </div>
+                                <p className="text-sm font-semibold text-slate-900">
+                                    {turno.clientName}
+                                </p>
+                                <p className="text-xs text-slate-500">
+                                    {turno.servicio} · {turno.barberName}
+                                </p>
                             </div>
-                        );
-                    })}
+                            <div className="flex gap-2">
+                                <button 
+                                    onClick={() => handleQuickFinalize(turno)}
+                                    className="p-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition active:scale-95"
+                                    title="Finalizar Turno"
+                                >
+                                    <IconCheck />
+                                </button>
+                                <button 
+                                    onClick={() => handleQuickCancel(turno)}
+                                    className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition active:scale-95"
+                                    title="Cancelar Turno"
+                                >
+                                    <IconTrash />
+                                </button>
+                            </div>
+                        </div>
+                    ))}
                 </>
             )}
           </div>
         </div>
       </div>
+
+      {/* =========================================
+          MODAL DE CONFIRMACIÓN CUSTOM
+      ========================================= */}
+      {confirmOpen && (
+        <div 
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm transition-opacity"
+          onClick={() => setConfirmOpen(false)}
+        >
+          <div 
+            ref={confirmModalRef}
+            className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl animate-fadeIn text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
+              <IconAlertModal />
+            </div>
+            
+            <h3 className="text-lg font-bold text-slate-900 mb-2">
+              {confirmConfig.title}
+            </h3>
+            
+            <p className="text-sm text-slate-500 mb-6 px-2 leading-relaxed">
+              {confirmConfig.message}
+            </p>
+            
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setConfirmOpen(false)}
+                className="flex-1 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 font-medium text-sm transition"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={confirmConfig.action}
+                className={`flex-1 py-2.5 rounded-lg text-white font-bold text-sm shadow-sm active:scale-95 transition ${
+                  confirmConfig.isDanger 
+                    ? "bg-red-600 hover:bg-red-700" 
+                    : "bg-emerald-600 hover:bg-emerald-700" // Usamos esmeralda para acciones que no son peligro
+                }`}
+              >
+                {confirmConfig.confirmText}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
