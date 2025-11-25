@@ -417,14 +417,23 @@ export const Turnos: React.FC = () => {
       false, // No es peligroso
       async () => {
         if (!uid || !currentTurnoId || !formClientId) return;
+
+        // Necesitamos el nombre del barbero y la ID para la venta
+        const barberData = empleados.find(e => e.id === formBarberId);
+        const clientName = clientes.find(c => c.id === formClientId)?.nombre || 'Cliente';
+        
         try {
             // 1. CREAR DOCUMENTO DE VENTA
             const ventaRef = await addDoc(collection(barberDb, `barber_users/${uid}/ventas`), {
                 monto: Number(formPrice),
-                descripcion: `Venta - Turno: ${formService} de ${clientes.find(c => c.id === formClientId)?.nombre || 'Cliente'}`,
+                descripcion: `Venta - Turno: ${formService} de ${clientName}`,
                 tipo: 'Ingreso',
                 date: formatDateToInput(new Date()), // Fecha actual de la finalización
                 createdAt: serverTimestamp(),
+                
+                // CRÍTICO: Añadir barbero ID y nombre a la VENTA para liquidaciones
+                barberId: formBarberId,
+                barberName: barberData?.nombre || 'Desconocido', 
             });
 
             // 2. ACTUALIZAR TURNO (Estado y ventaId)
@@ -439,7 +448,7 @@ export const Turnos: React.FC = () => {
           
           closeModal();
           setConfirmOpen(false);
-          loadTurnos();
+          loadTurnos(); // Recargar turnos
         } catch (e) {
           console.error(e);
         }

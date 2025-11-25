@@ -27,7 +27,7 @@ const IconAdd = () => (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
   </svg>
 );
-// TS6133 CORREGIDO: IconList eliminado, ya que no se usa en Dashboard.tsx.
+// TS6133 CORREGIDO: IconList eliminado.
 
 const IconAlert = () => (
   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -82,6 +82,8 @@ interface Venta {
   tipo: 'Ingreso' | 'Gasto';
   descripcion: string;
   createdAt: Timestamp;
+  barberId?: string; // IMPORTANTE para liquidación
+  barberName?: string; // IMPORTANTE para liquidación
 }
 interface Producto {
   nombre: string;
@@ -145,11 +147,11 @@ export const Dashboard: React.FC = () => {
     isDanger?: boolean;
   }>({ title: "", message: "", action: () => {}, confirmText: "", isDanger: false });
   
-
-  // Estado del turno para la acción rápida
-  // TS6133 CORREGIDO: Se ignora la advertencia, ya que se usa para mostrar el contexto del modal.
+  // ERROR TS6133 CORREGIDO: Se ignora la advertencia, ya que se usa para mostrar el contexto del modal.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
   const [, setTurnoToAction] = useState<Turno | null>(null); 
-  // TS6133 CORREGIDO: Se ignora la advertencia, ya que se usa para almacenar datos en fetchDashboardData.
+  // ERROR TS6133 CORREGIDO: Se ignora la advertencia, ya que se usa para almacenar datos en fetchDashboardData.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
   const [, setClientesList] = useState<any[]>([]); 
   const confirmModalRef = useRef<HTMLDivElement>(null);
 
@@ -168,6 +170,9 @@ export const Dashboard: React.FC = () => {
   const [formDate, setFormDate] = useState<string>(formatDateToInput(new Date()));
   const [ventaType, setVentaType] = useState<'servicio' | 'manual'>('servicio'); 
   const [selectedServiceId, setSelectedServiceId] = useState<string>(''); 
+  
+  // NUEVO ESTADO: Empleado para la Venta Rápida (Obligatorio)
+  const [formBarberId, setFormBarberId] = useState('');
   // ===============================================
 
   /* =========================================================
@@ -187,6 +192,12 @@ export const Dashboard: React.FC = () => {
       const empList = empSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Empleado));
       setTotalEmpleados(empList.length);
       setEmpleadosList(empList);
+      
+      // Si la lista de empleados no está vacía, preseleccionar el primero para el modal
+      if (empList.length > 0) {
+          setFormBarberId(empList[0].id);
+      }
+
 
       const cliSnap = await getDocs(collection(barberDb, `barber_users/${userUid}/clientes`));
       const cliList = cliSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -311,7 +322,15 @@ export const Dashboard: React.FC = () => {
     } else {
         setVentaType('manual'); // Si no hay servicios, forzar manual
     }
-  }, [servicios]);
+    
+    // Mantener formBarberId preseleccionado o resetear al primero
+    if (empleadosList.length > 0) {
+        setFormBarberId(empleadosList[0].id);
+    } else {
+        setFormBarberId('');
+    }
+    
+  }, [servicios, empleadosList]);
 
   const openModal = () => {
     resetForm();
@@ -320,8 +339,6 @@ export const Dashboard: React.FC = () => {
 
   const closeModal = useCallback(() => {
     setModalOpen(false);
-    // No reseteamos aquí para mantener los datos si se cancela la edición, 
-    // pero sí lo hacemos al abrir uno nuevo.
   }, []);
 
   // Manejo de clicks fuera del modal
@@ -362,17 +379,27 @@ export const Dashboard: React.FC = () => {
 
   const handleSave = async () => {
     if (!uid || !formMonto || !formDescripcion.trim() || !formDate) return alert("Completa todos los campos.");
-
+    
+    // **VALIDACIÓN CRÍTICA: Empleado Obligatorio para Ingresos**
+    if (formTipo === 'Ingreso' && !formBarberId) {
+        return alert("Debe seleccionar un Barbero para registrar una Venta.");
+    }
+    
     const montoNum = Number(formMonto);
     if (isNaN(montoNum) || montoNum <= 0) return alert("El monto debe ser un número positivo.");
 
     try {
+      const selectedBarber = empleadosList.find(e => e.id === formBarberId);
+      
       const data = {
         monto: montoNum, 
         descripcion: formDescripcion.trim(),
         tipo: formTipo,
         date: formDate, 
         servicioId: ventaType === 'servicio' && selectedServiceId ? selectedServiceId : null,
+        // Añadir datos de barbero solo si es un ingreso (venta)
+        barberId: formTipo === 'Ingreso' ? formBarberId : null,
+        barberName: formTipo === 'Ingreso' && selectedBarber ? selectedBarber.nombre : null,
         updatedAt: serverTimestamp(),
       };
 
@@ -399,7 +426,7 @@ export const Dashboard: React.FC = () => {
     const modalElement = confirmModalRef.current; // Usar confirmModalRef
     if (confirmOpen && modalElement && !modalElement.contains(event.target as Node)) {
       setConfirmOpen(false);
-      setTurnoToAction(null);
+      // setTurnoToAction(null); // Ya no es necesario
     }
   }, [confirmOpen]);
 
@@ -420,39 +447,48 @@ export const Dashboard: React.FC = () => {
   // ... (handleQuickFinalize, handleQuickCancel, getFilteredTurnos, timelineAppointments)
 
   const handleQuickFinalize = (turno: Turno) => {
-    setTurnoToAction(turno); // Se mantiene para que el modal muestre la información
+    // Se mantiene setTurnoToAction para que el modal muestre la información
+    // Aunque el valor no se lee directamente del estado, el setter se usa.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
+    setTurnoToAction(turno); 
+    
     triggerConfirm(
       "Confirmar Asistencia",
       `¿Deseas finalizar el turno de ${turno.clientName} (${turno.servicio})? Esto registrará la venta y sumará puntos de fidelidad.`,
       "Sí, finalizar",
       false, 
       async () => {
-        // USAMOS EL OBJETO 'turno' DEL CLOSURE EN LUGAR DE 'turnoToAction' (estado)
         if (!uid || !turno.id) return; 
+        
+
         try {
             // 1. CREAR DOCUMENTO DE VENTA
             const ventaRef = await addDoc(collection(barberDb, `barber_users/${uid}/ventas`), {
-                monto: Number(turno.precio), // Usando turno.precio
+                monto: Number(turno.precio), 
                 descripcion: `Venta - Turno: ${turno.servicio} de ${turno.clientName}`,
                 tipo: 'Ingreso',
                 date: todayDateStr, 
+                
+                // FIX CLAVE: Añadir barberId y Name para liquidaciones
+                barberId: turno.barberId, 
+                barberName: turno.barberName, 
+                
                 createdAt: serverTimestamp(), 
             });
 
             // 2. ACTUALIZAR TURNO (Estado y ventaId)
-            await updateDoc(doc(barberDb, `barber_users/${uid}/turnos/${turno.id}`), { // Usando turno.id
+            await updateDoc(doc(barberDb, `barber_users/${uid}/turnos/${turno.id}`), { 
                 estado: "completado",
                 ventaId: ventaRef.id, 
             });
 
             // 3. SUMAR PUNTO DE FIDELIDAD
-            if (turno.clientId) { // Usando turno.clientId
+            if (turno.clientId) { 
                 const clientRef = doc(barberDb, `barber_users/${uid}/clientes/${turno.clientId}`);
                 await updateDoc(clientRef, { cortes: increment(1) });
             }
             
             setConfirmOpen(false);
-            setTurnoToAction(null);
             fetchDashboardData(uid!); 
         } catch (e) {
             console.error("Error al finalizar turno rápido", e);
@@ -463,6 +499,7 @@ export const Dashboard: React.FC = () => {
   };
 
   const handleQuickCancel = (turno: Turno) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
     setTurnoToAction(turno); // Se mantiene para que el modal muestre la información
     triggerConfirm(
       "Cancelar Turno",
@@ -477,7 +514,7 @@ export const Dashboard: React.FC = () => {
             await deleteDoc(doc(barberDb, `barber_users/${uid}/turnos/${turno.id}`));
             
             setConfirmOpen(false);
-            setTurnoToAction(null);
+            // setTurnoToAction(null); // No es necesario si no se usa
             fetchDashboardData(uid!); 
         } catch (e) {
             console.error("Error al cancelar turno rápido", e); // Si hay un error de Firebase, aparecerá aquí.
@@ -812,7 +849,12 @@ export const Dashboard: React.FC = () => {
                 <label className="text-xs font-medium text-slate-600 mb-1 block">Tipo de Monto</label>
                 <div className="flex space-x-4">
                   <button 
-                    onClick={() => setFormTipo('Ingreso')}
+                    onClick={() => {
+                        setFormTipo('Ingreso');
+                        // Restaurar selección de empleado y tipo de venta al cambiar a Ingreso
+                        setFormBarberId(empleadosList[0]?.id || '');
+                        setVentaType(servicios.length > 0 ? 'servicio' : 'manual');
+                    }}
                     className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 cursor-pointer ${
                       formTipo === 'Ingreso' 
                         ? 'bg-emerald-50 border-emerald-500 text-emerald-800' 
@@ -822,7 +864,11 @@ export const Dashboard: React.FC = () => {
                     Ingreso (+)
                   </button>
                   <button 
-                    onClick={() => setFormTipo('Gasto')}
+                    onClick={() => {
+                        setFormTipo('Gasto');
+                        // Anular selección de empleado al cambiar a Gasto
+                        setFormBarberId('');
+                    }}
                     className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 cursor-pointer ${
                       formTipo === 'Gasto' 
                         ? 'bg-red-50 border-red-500 text-red-800' 
@@ -834,6 +880,35 @@ export const Dashboard: React.FC = () => {
                 </div>
               </div>
               
+              {/* Selector de Empleado (solo si es tipo Ingreso) */}
+              {formTipo === 'Ingreso' && empleadosList.length > 0 && (
+                  <div className="border-t border-slate-100 pt-4">
+                      <label className="text-xs font-medium text-slate-600 mb-1 block">Barbero Asignado (Obligatorio)</label>
+                      <select
+                          value={formBarberId}
+                          onChange={(e) => setFormBarberId(e.target.value)}
+                          className={inputClass + ' cursor-pointer'}
+                      >
+                          <option value="">-- Selecciona un Barbero --</option>
+                          {empleadosList.map((e) => (
+                              <option key={e.id} value={e.id}>
+                                  {e.nombre}
+                              </option>
+                          ))}
+                      </select>
+                      {/* Mostrar advertencia si el empleado no está seleccionado y se intenta guardar */}
+                      {!formBarberId && <p className="text-xs text-red-500 mt-1">
+                          Debe asignar esta venta a un empleado para el cálculo de comisiones.
+                      </p>}
+                  </div>
+              )}
+              {formTipo === 'Ingreso' && empleadosList.length === 0 && (
+                  <p className="text-xs text-red-500 mt-1">
+                      ADVERTENCIA: No hay empleados registrados para asignar la venta.
+                  </p>
+              )}
+
+
               {/* Selector de Venta (Servicio vs Manual) */}
               {formTipo === 'Ingreso' && (
                 <div className="border-t border-slate-100 pt-4">
@@ -929,7 +1004,7 @@ export const Dashboard: React.FC = () => {
                   value={formDescripcion} 
                   onChange={(e) => setFormDescripcion(e.target.value)} 
                   className={inputClass}
-                  placeholder={formTipo === 'Ingreso' ? "Venta o Ingreso Extra" : "Compra de productos para stock"} 
+                  placeholder={formTipo === 'Ingreso' ? "Venta de corte y barba" : "Compra de navajas"} 
                 />
               </div>
 
@@ -943,6 +1018,7 @@ export const Dashboard: React.FC = () => {
                 <button 
                   onClick={handleSave}
                   className={btnPrimary + ' cursor-pointer'}
+                  disabled={formTipo === 'Ingreso' && !formBarberId} // Deshabilitar si es ingreso y no hay barbero
                 >
                   Registrar Transacción
                 </button>
@@ -951,6 +1027,7 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
       )}
+
       {/* =========================================
           MODAL DE CONFIRMACIÓN CUSTOM (Mantener la lógica si es necesario)
       ========================================= */}

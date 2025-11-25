@@ -5,7 +5,7 @@ import {
   sendPasswordResetEmail,
   signOut,
 } from "firebase/auth";
-import type { UserCredential } from "firebase/auth"; // ERROR TS1484 CORREGIDO: Importar como tipo
+import type { UserCredential } from "firebase/auth"; 
 
 import {
   collection,
@@ -43,7 +43,7 @@ export const registerBarberUser = async (
   await setDoc(ref, {
     uid: cred.user.uid,
     email,
-    role: "owner", // 🔥 necesario para que pueda crear empleados
+    role: "owner", // 🔥 Rol inicial como dueño
     activo: true,
     porcentaje: 0, // dueño no cobra %, pero se puede dejar
     origen: "signup-barber",
@@ -60,14 +60,16 @@ export const registerBarberUser = async (
 export const loginBarberUser = async (email: string, password: string) => {
   const cred = await signInWithEmailAndPassword(barberAuth, email, password);
 
-  // Verificar documento en Firestore
+  // Verificar documento en Firestore (solo para dueños)
   const ref = doc(usersCol, cred.user.uid);
   const snap = await getDoc(ref);
 
   if (!snap.exists()) {
+    // Si el usuario no tiene un documento en /barber_users, puede ser un empleado
+    // o un registro incompleto. En este flujo, forzamos que el dueño exista aquí.
     await signOut(barberAuth);
     throw new Error(
-      "Tu usuario no está registrado correctamente. Contactá al administrador."
+      "Usuario no registrado como dueño. Use la pestaña 'Empleado' o regístrese."
     );
   }
 

@@ -19,7 +19,8 @@ import { Clientes } from "./pages/Clientes.tsx";
 import { Turnos } from "./pages/Turnos.tsx";
 import { Servicios } from "./pages/Servicios.tsx";
 import { Ventas } from "./pages/Ventas.tsx";
-import { Stock } from "./pages/Stock.tsx"; // ✅ Importamos Stock
+import { Stock } from "./pages/Stock.tsx";
+import { Configuracion } from "./pages/Configuracion.tsx";
 
 export const BarberApp: React.FC = () => {
   const location = useLocation();
@@ -55,6 +56,8 @@ export const BarberApp: React.FC = () => {
             <Route path="ventas" element={<Ventas />} />
             
             <Route path="stock" element={<Stock />} />
+
+            <Route path="configuracion" element={<Configuracion />} />
 
           </Route>
 
