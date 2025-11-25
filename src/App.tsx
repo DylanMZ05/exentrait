@@ -1,4 +1,3 @@
-// src/App.tsx
 import {
   BrowserRouter as Router,
   Routes,
@@ -6,21 +5,23 @@ import {
   useLocation,
 } from "react-router-dom";
 
-import Login from "./pages/ClienteView/Login";
-import ClienteView from "./pages/ClienteView/ClienteView";
-import Home from "./pages/Home/Home";
-import Updates from "./pages/Updates/Updates";
+// IMPORTACIONES CORREGIDAS: Aseguramos la resolución añadiendo la extensión .tsx
+import Login from "./pages/ClienteView/Login.tsx";
+import ClienteView from "./pages/ClienteView/ClienteView.tsx";
+import Home from "./pages/Home/Home.tsx";
+import Updates from "./pages/Updates/Updates.tsx";
 
-import Header from "./components/Header";
-import Footer from "./components/Footer";
+import Header from "./components/Header.tsx";
+import Footer from "./components/Footer.tsx";
 
 // Módulo Barber Manager
-import { BarberApp } from "./barber-manager/BarberApp";
+import { BarberApp } from "./barber-manager/BarberApp.tsx";
 
 function AppContent() {
   const location = useLocation();
 
   // Ocultamos el Header y Footer normales si estamos dentro de Barber Manager
+  // NOTA: La ruta /barber-manager/* ya incluye su propio header (BarberHeader)
   const hideLayout = location.pathname.startsWith("/barber-manager");
 
   return (
@@ -37,7 +38,7 @@ function AppContent() {
           <Route path="/gym-manager/updates" element={<Updates />} />
 
           {/* ---- BARBER MANAGER ---- */}
-          {/* TODAS LAS RUTAS INTERNAS USAN BarberApp */}
+          {/* TODAS LAS RUTAS INTERNAS USAN BarberApp (incluida /ventas) */}
           <Route path="/barber-manager/*" element={<BarberApp />} />
         </Routes>
       </main>

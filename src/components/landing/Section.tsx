@@ -16,7 +16,7 @@ export default function Section({
   const innerClass = [
     contained ? "max-w-7xl" : "",
     "mx-auto px-4 sm:px-6 lg:px-8",
-    contained ? "py-12 lg:py-16" : "",
+    contained ? "py-12 lg:py-16 pt-18" : "",
   ]
     .filter(Boolean)
     .join(" ");
