@@ -1,3 +1,4 @@
+// src/barber-manager/pages/Ventas.tsx
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import {
   collection,
@@ -40,7 +41,7 @@ interface TransaccionGroup {
 }
 
 /* ============================================================
-   ICONOS SVG
+    ICONOS SVG
 ============================================================ */
 
 const IconAdd = () => (
@@ -77,7 +78,7 @@ const IconChevron = ({ isOpen }: { isOpen: boolean }) => (
 );
 
 /* ============================================================
-   COMPONENTES REUTILIZABLES DE UI
+    COMPONENTES REUTILIZABLES DE UI
 ============================================================ */
 
 // Formato de moneda
@@ -129,7 +130,7 @@ const CollapsibleSection: React.FC<{
 
 
 /* ============================================================
-   FUNCIONES DE DATOS Y LÓGICA
+    FUNCIONES DE DATOS Y LÓGICA
 ============================================================ */
 
 // Formato de fecha YYYY-MM-DD
@@ -187,7 +188,7 @@ const monthNames = [
 ];
 
 /* ============================================================
-   COMPONENTE PRINCIPAL DE VENTAS
+    COMPONENTE PRINCIPAL DE VENTAS
 ============================================================ */
 export const Ventas: React.FC = () => {
   const user = barberAuth.currentUser;
@@ -217,7 +218,7 @@ export const Ventas: React.FC = () => {
   const [selectedServiceId, setSelectedServiceId] = useState<string>(''); 
 
   /* ============================================================
-     CARGA DE DATOS Y SERVICIOS
+    CARGA DE DATOS Y SERVICIOS
   ============================================================ */
   const loadTransacciones = async () => {
     if (!uid) return;
@@ -265,7 +266,7 @@ export const Ventas: React.FC = () => {
   const totalSummary = useMemo(() => calculateTotals(transacciones), [transacciones]);
 
   /* ============================================================
-     GESTIÓN DE MODAL Y FORMULARIO
+    GESTIÓN DE MODAL Y FORMULARIO
   ============================================================ */
   const resetForm = (servicesList: Servicio[]) => {
     setCurrentId(null);
@@ -356,16 +357,18 @@ export const Ventas: React.FC = () => {
             setFormTipo('Ingreso');
         }
     } else if (ventaType === 'manual' && !isEditing) {
-        // En modo manual (al cambiar de servicio), limpiamos campos si no estamos editando
-        setFormDescripcion('');
-        setFormMonto('');
+      // En modo manual (al cambiar de servicio), limpiamos campos si no estamos editando
+      setFormDescripcion('');
+      setFormMonto('');
+      // Mantener el tipo de Monto si se pasa a manual
+      // setFormTipo('Ingreso'); 
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ventaType, selectedServiceId, servicios]); // isEditing ya no es dependencia, solo modifica el reset.
 
 
   /* ============================================================
-     CRUD HANDLERS
+    CRUD HANDLERS
   ============================================================ */
   const handleSave = async () => {
     if (!uid || !formMonto || !formDescripcion.trim() || !formDate) return alert("Completa todos los campos.");
@@ -426,7 +429,7 @@ export const Ventas: React.FC = () => {
 
 
   /* ============================================================
-     RENDER
+    RENDER
   ============================================================ */
 
   // Función auxiliar para renderizar una transacción individual
@@ -462,14 +465,14 @@ export const Ventas: React.FC = () => {
           </span>
           <button 
             onClick={() => openModal(t)}
-            className="p-1 text-slate-400 hover:text-slate-800 transition rounded-md"
+            className="p-1 text-slate-400 hover:text-slate-800 transition rounded-md cursor-pointer"
             aria-label="Editar"
           >
             <IconEdit />
           </button>
           <button 
             onClick={() => triggerDelete(t)} // Usa el nuevo trigger
-            className="p-1 text-slate-300 hover:text-red-600 transition rounded-md"
+            className="p-1 text-slate-300 hover:text-red-600 transition rounded-md cursor-pointer"
             aria-label="Eliminar"
           >
             <IconTrash />
@@ -512,7 +515,7 @@ export const Ventas: React.FC = () => {
 
         <button 
           onClick={() => openModal()}
-          className="flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-lg text-sm font-medium transition-all shadow-sm active:scale-95 whitespace-nowrap md:w-48"
+          className="flex items-center justify-center cursor-pointer gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-lg text-sm font-medium transition-all shadow-sm active:scale-95 whitespace-nowrap md:w-48"
         >
           <IconAdd />
           Nueva Transacción
@@ -528,7 +531,7 @@ export const Ventas: React.FC = () => {
       ) : transacciones.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 border-dashed">
           <p className="text-slate-400 mb-2">No se encontraron transacciones en la base de datos.</p>
-          <button onClick={() => openModal()} className="text-sm text-slate-900 font-medium hover:underline">
+          <button onClick={() => openModal()} className="text-sm cursor-pointer text-slate-900 font-medium hover:underline">
             Registrar la primera ahora
           </button>
         </div>
@@ -537,7 +540,14 @@ export const Ventas: React.FC = () => {
           {/* Agrupación por AÑO */}
           {Object.entries(groupedTransacciones).sort(([yearA], [yearB]) => Number(yearB) - Number(yearA)).map(([year, months]) => {
             
-            const yearTransacciones = Object.values(months).flatMap(Object.values).flat();
+            // CORRECCIÓN TS2769: Castear el objeto 'months' a TransaccionGroup[year] para la iteración interna
+            const monthsObj = months as TransaccionGroup[number];
+
+            const yearTransacciones = Object.values(monthsObj)
+              .flatMap(m => Object.values(m) as Transaccion[][]) 
+              .flat() as Transaccion[]; 
+            // Fin corrección
+            
             const yearTotals = calculateTotals(yearTransacciones);
             
             const yearSummary = (
@@ -550,9 +560,12 @@ export const Ventas: React.FC = () => {
               <CollapsibleSection key={year} title={`Año ${year}`} initialOpen={true} summary={yearSummary}>
                 <div className="space-y-3">
                   {/* Agrupación por MES */}
-                  {Object.entries(months).sort(([monthA], [monthB]) => Number(monthB) - Number(monthA)).map(([month, days]) => {
+                  {Object.entries(monthsObj).sort(([monthA], [monthB]) => Number(monthB) - Number(monthA)).map(([month, days]) => {
                     
-                    const monthTransacciones = Object.values(days).flat();
+                    // CORRECCIÓN TS2769: Se castean los valores a Transaccion[]
+                    const monthTransacciones = Object.values(days).flat() as Transaccion[]; 
+                    // Fin corrección
+                    
                     const monthTotals = calculateTotals(monthTransacciones);
                     
                     const monthSummary = (
@@ -571,9 +584,12 @@ export const Ventas: React.FC = () => {
                       >
                         <div className="space-y-2">
                           {/* Agrupación por DÍA */}
-                          {Object.entries(days).sort(([dayA], [dayB]) => Number(dayB) - Number(dayA)).map(([day, dailyTransacciones]) => {
+                          {/* CORRECCIÓN TS2769: Castear Object.entries para asegurar que los valores sean Transaccion[] */}
+                          {Object.entries(days as { [key: string]: Transaccion[] }).sort(([dayA], [dayB]) => Number(dayB) - Number(dayA)).map(([day, dailyTransacciones]) => {
                             
+                            // dailyTransacciones ya es Transaccion[]
                             const dayTotals = calculateTotals(dailyTransacciones);
+                            // Fin corrección
 
                             const daySummary = (
                                 <span className={`text-xs font-medium ${dayTotals.neto >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
@@ -626,7 +642,7 @@ export const Ventas: React.FC = () => {
                 <div className="flex space-x-4">
                   <button 
                     onClick={() => setFormTipo('Ingreso')}
-                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 ${
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 cursor-pointer ${
                       formTipo === 'Ingreso' 
                         ? 'bg-emerald-50 border-emerald-500 text-emerald-800' 
                         : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
@@ -636,7 +652,7 @@ export const Ventas: React.FC = () => {
                   </button>
                   <button 
                     onClick={() => setFormTipo('Gasto')}
-                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 ${
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 cursor-pointer ${
                       formTipo === 'Gasto' 
                         ? 'bg-red-50 border-red-500 text-red-800' 
                         : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
@@ -654,7 +670,7 @@ export const Ventas: React.FC = () => {
                     <div className="flex space-x-4 mb-3">
                         <button 
                             onClick={() => { setVentaType('servicio'); setSelectedServiceId(servicios[0]?.id || ''); }}
-                            className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors border-2 ${
+                            className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors border-2 cursor-pointer ${
                                 ventaType === 'servicio' 
                                     ? 'bg-slate-800 border-slate-900 text-white' 
                                     : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
@@ -665,7 +681,7 @@ export const Ventas: React.FC = () => {
                         </button>
                         <button 
                             onClick={() => { setVentaType('manual'); setSelectedServiceId(''); }}
-                            className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors border-2 ${
+                            className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors border-2 cursor-pointer ${
                                 ventaType === 'manual' 
                                     ? 'bg-slate-800 border-slate-900 text-white' 
                                     : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
@@ -681,7 +697,7 @@ export const Ventas: React.FC = () => {
                             <select
                                 value={selectedServiceId}
                                 onChange={(e) => setSelectedServiceId(e.target.value)}
-                                className={inputClass}
+                                className={inputClass + ' cursor-pointer'}
                             >
                                 {servicios.map((s) => (
                                     <option key={s.id} value={s.id}>
@@ -704,7 +720,7 @@ export const Ventas: React.FC = () => {
                   type="date" 
                   value={formDate} 
                   onChange={(e) => setFormDate(e.target.value)} 
-                  className={inputClass}
+                  className={inputClass + ' cursor-pointer'}
                   max={formatDateToInput(new Date())} // No permitir fechas futuras
                 />
               </div>
@@ -749,13 +765,13 @@ export const Ventas: React.FC = () => {
               <div className="flex gap-3 pt-2">
                 <button 
                   onClick={closeModal}
-                  className={btnSecondary}
+                  className={btnSecondary + ' cursor-pointer'}
                 >
                   Cancelar
                 </button>
                 <button 
                   onClick={handleSave}
-                  className={btnPrimary}
+                  className={btnPrimary + ' cursor-pointer'}
                 >
                   {isEditing ? "Guardar Cambios" : "Registrar Transacción"}
                 </button>
@@ -769,7 +785,7 @@ export const Ventas: React.FC = () => {
           MODAL DE CONFIRMACIÓN DE ELIMINACIÓN (Custom UX)
       ========================================= */}
       {deleteConfirmOpen && transactionToDelete && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm transition-opacity">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
           <div 
             ref={deleteModalRef}
             className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl animate-fadeIn text-center"
@@ -790,13 +806,13 @@ export const Ventas: React.FC = () => {
             <div className="flex gap-3">
               <button 
                 onClick={() => setDeleteConfirmOpen(false)}
-                className={btnSecondary}
+                className={btnSecondary + ' cursor-pointer'}
               >
                 Cancelar
               </button>
               <button 
                 onClick={handleDelete}
-                className="w-full py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 active:scale-[0.98] transition font-medium text-sm"
+                className="w-full py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 active:scale-[0.98] transition font-medium text-sm cursor-pointer"
               >
                 Sí, eliminar
               </button>

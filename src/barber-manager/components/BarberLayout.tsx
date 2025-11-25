@@ -1,5 +1,6 @@
 // src/barber-manager/components/BarberLayout.tsx
-import { ReactNode } from "react";
+import type { ReactNode } from "react";
+import React from "react";
 
 interface Props {
   children: ReactNode;

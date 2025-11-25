@@ -7,7 +7,6 @@ import {
   deleteDoc,
   doc,
   query,
-  orderBy,
   serverTimestamp,
 } from "firebase/firestore";
 import { barberDb, barberAuth } from "../services/firebaseBarber";

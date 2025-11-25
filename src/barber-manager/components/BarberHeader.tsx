@@ -181,7 +181,7 @@ export const BarberHeader: React.FC = () => {
             className="hidden md:flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-3 py-2 rounded-lg text-xs font-medium transition-all shadow-sm active:scale-95"
           >
             <IconHome />
-            Regresar a página Inicial
+            Inicio Exentra IT
           </button>
 
        <div className="hidden sm:flex flex-col text-right">
@@ -194,7 +194,7 @@ export const BarberHeader: React.FC = () => {
        <button
          ref={buttonRef}
          onClick={toggleMenu}
-         className="w-9 h-9 flex flex-col items-center justify-center gap-[4px] rounded-lg bg-slate-800 hover:bg-slate-700 transition"
+         className="cursor-pointer w-9 h-9 flex flex-col items-center justify-center gap-[4px] rounded-lg bg-slate-800 hover:bg-slate-700 transition"
        >
          <span className={`block h-[2px] w-5 bg-white rounded-full transition-transform ${menuOpen ? "translate-y-[6px] rotate-45" : ""}`} />
          <span className={`block h-[2px] w-5 bg-white rounded-full transition-opacity ${menuOpen ? "opacity-0" : "opacity-100"}`} />
@@ -215,49 +215,49 @@ export const BarberHeader: React.FC = () => {
 
          <nav className="py-2 max-h-[400px] overflow-y-auto custom-scrollbar">
           {/* BOTÓN INICIO (DASHBOARD) */}
-          <button onClick={() => goTo("/barber-manager/dashboard")} className="w-full px-4 py-2 text-left flex items-center gap-2 hover:bg-slate-800 transition-colors">
+          <button onClick={() => goTo("/barber-manager/dashboard")} className="cursor-pointer w-full px-4 py-2 text-left flex items-center gap-2 hover:bg-slate-800 transition-colors">
             <IconBox><IconDashboard /></IconBox> Panel General
           </button>
               
               {/* Separador */}
               <div className="border-t border-slate-700 my-1"></div>
 
-          <button onClick={() => goTo("/barber-manager/turnos")} className="w-full px-4 py-2 flex items-center gap-2 text-left hover:bg-slate-800 transition-colors">
+          <button onClick={() => goTo("/barber-manager/turnos")} className="cursor-pointer w-full px-4 py-2 flex items-center gap-2 text-left hover:bg-slate-800 transition-colors">
             <IconBox><IconCalendar /></IconBox> Turnos
           </button>
 
-          <button onClick={() => goTo("/barber-manager/clientes")} className="w-full px-4 py-2 flex items-center gap-2 text-left hover:bg-slate-800 transition-colors">
+          <button onClick={() => goTo("/barber-manager/clientes")} className="cursor-pointer w-full px-4 py-2 flex items-center gap-2 text-left hover:bg-slate-800 transition-colors">
             <IconBox><IconClients /></IconBox> Clientes
           </button>
               
-          <button onClick={() => goTo("/barber-manager/empleados")} className="w-full px-4 py-2 flex items-center gap-2 text-left hover:bg-slate-800 transition-colors">
+          <button onClick={() => goTo("/barber-manager/empleados")} className="cursor-pointer w-full px-4 py-2 flex items-center gap-2 text-left hover:bg-slate-800 transition-colors">
             <IconBox><IconEmployees /></IconBox> Empleados
           </button>
 
-          <button onClick={() => goTo("/barber-manager/servicios")} className="w-full px-4 py-2 flex items-center gap-2 text-left hover:bg-slate-800 transition-colors">
+          <button onClick={() => goTo("/barber-manager/servicios")} className="cursor-pointer w-full px-4 py-2 flex items-center gap-2 text-left hover:bg-slate-800 transition-colors">
             <IconBox><IconServices /></IconBox> Servicios
           </button>
 
           {/* Sección de Reportes y Stock */}
           <div className="border-t border-slate-700 my-1"></div>
 
-          <button onClick={() => goTo("/barber-manager/ventas")} className="w-full px-4 py-2 flex items-center gap-2 text-left hover:bg-slate-800 transition-colors">
+          <button onClick={() => goTo("/barber-manager/ventas")} className="cursor-pointer w-full px-4 py-2 flex items-center gap-2 text-left hover:bg-slate-800 transition-colors">
             <IconBox><IconSales /></IconBox> Ventas
           </button>
 
-          <button onClick={() => goTo("/barber-manager/stock")} className="w-full px-4 py-2 flex items-center gap-2 text-left hover:bg-slate-800 transition-colors">
+          <button onClick={() => goTo("/barber-manager/stock")} className="cursor-pointer w-full px-4 py-2 flex items-center gap-2 text-left hover:bg-slate-800 transition-colors">
             <IconBox><IconStock /></IconBox> Stock
           </button>
 
           {/* Cierre de Sesión */}
           <div className="border-t border-slate-700 mt-2 pt-2">
                 {/* Botón de volver a Home también para móvil */}
-                <button onClick={goToHomePage} className="md:hidden w-full px-4 py-2 flex items-center gap-2 text-left text-slate-300 hover:bg-slate-800 transition-colors">
+                <button onClick={goToHomePage} className="md:hidden cursor-pointer w-full px-4 py-2 flex items-center gap-2 text-left text-slate-300 hover:bg-slate-800 transition-colors">
                   <span className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-slate-700"><IconHome /></span> Regresar a Inicial
                 </button>
                 
                 {/* Botón de Cerrar Sesión */}
-            <button onClick={handleLogout} className="w-full px-4 py-2 flex items-center gap-2 text-left text-red-300 hover:bg-red-600/20 hover:text-red-200 transition-colors">
+            <button onClick={handleLogout} className="cursor-pointer w-full px-4 py-2 flex items-center gap-2 text-left text-red-300 hover:bg-red-600/20 hover:text-red-200 transition-colors">
              <span className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-red-900/40"><IconLogout /></span> Cerrar sesión
             </button>
           </div>

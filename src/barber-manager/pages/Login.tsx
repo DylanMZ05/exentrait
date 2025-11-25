@@ -1,5 +1,6 @@
 // src/barber-manager/pages/Login.tsx
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import type { FormEvent } from "react"; // ERROR TS1484 CORREGIDO: Importar FormEvent como tipo
 import { useLocation, useNavigate } from "react-router-dom";
 import { barberAuth } from "../services/firebaseBarber";
 import {
@@ -8,6 +9,7 @@ import {
   sendBarberPasswordReset,
 } from "../services/authService";
 import { onAuthStateChanged } from "firebase/auth";
+import React from "react"; // Aseguramos que React esté importado
 
 type Mode = "login" | "register";
 

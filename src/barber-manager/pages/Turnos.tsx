@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import {
   collection,
   addDoc,
@@ -88,7 +88,7 @@ const IconChevronRight = () => (
 
 
 /* ============================================================
-   HELPER: MANEJO DE FECHAS
+    HELPER: MANEJO DE FECHAS
 ============================================================ */
 
 /**
@@ -111,7 +111,7 @@ const formatDateToInput = (date: Date): string => {
 };
 
 /* ============================================================
-   HELPER: Generar horarios (24 HORAS)
+    HELPER: Generar horarios (24 HORAS)
 ============================================================ */
 const generateTimeSlots = () => {
   const slots = [];
@@ -126,7 +126,7 @@ const generateTimeSlots = () => {
 const TIME_SLOTS = generateTimeSlots(); // 48 SLOTS (00:00 a 23:30)
 
 /* ============================================================
-   COMPONENTE PRINCIPAL
+    COMPONENTE PRINCIPAL
 ============================================================ */
 export const Turnos: React.FC = () => {
   const user = barberAuth.currentUser;
@@ -137,7 +137,7 @@ export const Turnos: React.FC = () => {
   const [clientes, setClientes] = useState<any[]>([]);
   const [serviciosList, setServiciosList] = useState<any[]>([]); // 🔥 Lista de servicios
   const [turnos, setTurnos] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // 'loading' se usa en loadTurnos/loadResources y JSX
 
   // Fecha seleccionada
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split("T")[0]);
@@ -175,7 +175,7 @@ export const Turnos: React.FC = () => {
   const [newClientPhone, setNewClientPhone] = useState("");
 
   /* ============================================================
-     NAVEGACIÓN DE DÍAS
+    NAVEGACIÓN DE DÍAS
   ============================================================ */
   const goToPreviousDay = () => {
     setSelectedDate(changeDay(selectedDate, -1));
@@ -190,12 +190,13 @@ export const Turnos: React.FC = () => {
   };
 
   /* ============================================================
-     CARGA DE DATOS (CACHE FIRST)
+    CARGA DE DATOS (CACHE FIRST)
   ============================================================ */
   useEffect(() => {
     if (!uid) return;
 
     const loadResources = async () => {
+      setLoading(true);
       // 1. Cargar Empleados (Cache First)
       const empCacheKey = `barber_data_empleados_list_${uid}`;
       const empCache = localStorage.getItem(empCacheKey);
@@ -239,13 +240,14 @@ export const Turnos: React.FC = () => {
         setServiciosList(servList);
         localStorage.setItem(servCacheKey, JSON.stringify(servList));
       }
+      setLoading(false);
     };
 
     loadResources();
   }, [uid]);
 
   /* ============================================================
-     CARGA DE TURNOS (Siempre fresco)
+    CARGA DE TURNOS (Siempre fresco)
   ============================================================ */
   const loadTurnos = async () => {
     if (!uid) return;
@@ -272,7 +274,7 @@ export const Turnos: React.FC = () => {
   }, [selectedDate, uid]);
 
   /* ============================================================
-     HANDLERS APERTURA MODAL
+    HANDLERS APERTURA MODAL
   ============================================================ */
   const openNewTurno = (barberId: string, time: string) => {
     setIsEditing(false);
@@ -323,7 +325,7 @@ export const Turnos: React.FC = () => {
   };
 
   /* ============================================================
-     HELPER: CONFIRMACIÓN PERSONALIZADA
+    HELPER: CONFIRMACIÓN PERSONALIZADA
   ============================================================ */
   const triggerConfirm = (title: string, message: string, confirmText: string, isDanger: boolean, action: () => void) => {
     setConfirmConfig({ title, message, confirmText, isDanger, action });
@@ -331,7 +333,7 @@ export const Turnos: React.FC = () => {
   };
 
   /* ============================================================
-     LOGICA DE GUARDADO
+    LOGICA DE GUARDADO
   ============================================================ */
   const handleSave = async () => {
     if (!uid) return;
@@ -405,7 +407,7 @@ export const Turnos: React.FC = () => {
   };
 
   /* ============================================================
-     ACCIONES DE FLUJO (Con Confirmación Custom)
+    ACCIONES DE FLUJO (Con Confirmación Custom)
   ============================================================ */
   const requestFinalizar = () => {
     triggerConfirm(
@@ -503,7 +505,7 @@ export const Turnos: React.FC = () => {
   };
 
   /* ============================================================
-     RENDER
+    RENDER
   ============================================================ */
   const getTurnoInSlot = (barberId: string, time: string) => {
     return turnos.find(t => t.barberId === barberId && t.hora === time && t.estado !== "cancelado");
@@ -511,7 +513,6 @@ export const Turnos: React.FC = () => {
   
   // Helpers para estilos de formulario
   const inputClass = "w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-slate-800 outline-none text-sm";
-  const btnSecondary = "w-full py-2.5 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 active:scale-[0.98] transition font-medium text-sm";
 
 
   return (
@@ -574,7 +575,7 @@ export const Turnos: React.FC = () => {
             </div>
             {empleados.length === 0 ? (
               <div className="flex-1 p-4 text-center text-sm text-slate-500 italic">
-                No hay empleados.
+                {loading ? "Cargando empleados..." : "No hay empleados."}
               </div>
             ) : (
               empleados.map(emp => (
@@ -585,7 +586,12 @@ export const Turnos: React.FC = () => {
             )}
           </div>
 
-          {empleados.length > 0 && (
+          {loading ? (
+            <div className="text-center py-12">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-slate-900"></div>
+              <p className="mt-2 text-sm text-slate-500">Cargando turnos para {selectedDate}...</p>
+            </div>
+          ) : empleados.length > 0 && (
             <div className="divide-y divide-slate-100">
               {TIME_SLOTS.map(time => (
                 <div key={time} className="flex h-20 group">
@@ -642,8 +648,8 @@ export const Turnos: React.FC = () => {
       </div>
 
       {/* =========================================
-          MODAL FORMULARIO
-      ========================================= */}
+          MODAL FORMULARIO
+      ========================================= */}
       {modalOpen && (
         <div 
           className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm transition-opacity"
@@ -872,8 +878,8 @@ export const Turnos: React.FC = () => {
       )}
 
       {/* =========================================
-          MODAL DE CONFIRMACIÓN PERSONALIZADO
-      ========================================= */}
+          MODAL DE CONFIRMACIÓN PERSONALIZADO
+      ========================================= */}
       {confirmOpen && (
         <div 
           className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm transition-opacity"

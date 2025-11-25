@@ -1,3 +1,4 @@
+// src/barber-manager/pages/Dashboard.tsx
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { 
   collection, 
@@ -11,13 +12,14 @@ import {
   deleteDoc,
   addDoc,
   increment,
+  serverTimestamp, 
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { useNavigate } from "react-router-dom"; 
 import { barberDb, barberAuth } from "../services/firebaseBarber"; 
 
 /* =========================================================
-   ICONOS SVG (Autocontenido)
+    ICONOS SVG (Autocontenido)
 ========================================================= */
 
 const IconAdd = () => (
@@ -25,6 +27,12 @@ const IconAdd = () => (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
   </svg>
 );
+const IconList = () => (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+    </svg>
+);
+// ... (Otros Iconos)
 
 const IconAlert = () => (
   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -52,7 +60,7 @@ const IconTrash = () => (
 
 
 /* =========================================================
-   TIPADOS Y HELPERS
+    TIPADOS Y HELPERS
 ========================================================= */
 
 // Tipados (Simplificados)
@@ -65,7 +73,8 @@ interface Turno {
   clientName: string;
   servicio: string;
   precio: string;
-  estado: string; // "pendiente" | "completado" | "cancelado"
+  fecha: string; // Añadido para consistencia con la query de fecha
+  estado: "pendiente" | "completado" | "cancelado"; // Estado como string literal
   ventaId?: string;
 }
 interface Empleado {
@@ -73,6 +82,7 @@ interface Empleado {
   nombre: string;
 }
 interface Venta {
+  id: string; // Añadido id para mapeo de docs
   monto: number;
   tipo: 'Ingreso' | 'Gasto';
   descripcion: string;
@@ -82,6 +92,12 @@ interface Producto {
   nombre: string;
   cantidadActual: number;
   stockBajo: number;
+}
+// Nuevo Tipado para Servicio
+interface Servicio {
+    id: string;
+    nombre: string;
+    precio: number;
 }
 
 
@@ -96,20 +112,11 @@ const formatDateToInput = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
-const generateTimeSlots = () => {
-  const slots = [];
-  for (let i = 9; i <= 20; i++) {
-    const hour = i < 10 ? `0${i}` : `${i}`;
-    slots.push(`${hour}:00`);
-    if (i !== 20) slots.push(`${hour}:30`);
-  }
-  return slots;
-};
-const TIME_SLOTS = generateTimeSlots(); 
+// Se elimina generateTimeSlots y TIME_SLOTS (TS6133).
 
 
 /* =========================================================
-   COMPONENTE PRINCIPAL
+    COMPONENTE PRINCIPAL
 ========================================================= */
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -145,11 +152,29 @@ export const Dashboard: React.FC = () => {
 
   // Estado del turno para la acción rápida
   const [turnoToAction, setTurnoToAction] = useState<Turno | null>(null);
-  const [clientesList, setClientesList] = useState<any[]>([]); // Lista completa de clientes para lógica de fidelidad
+  // Se mantiene clientesList para la lógica de fetch (TS6133 ignorado)
+  const [clientesList, setClientesList] = useState<any[]>([]); 
   const confirmModalRef = useRef<HTMLDivElement>(null);
 
+  // ===============================================
+  // ESTADOS DEL MODAL DE VENTA RÁPIDA (Copiados de Ventas.tsx)
+  // ===============================================
+  const [modalOpen, setModalOpen] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const [servicios, setServicios] = useState<Servicio[]>([]);
+
+  // Estados del formulario de venta
+  const [currentId, setCurrentId] = useState<string | null>(null);
+  const [formMonto, setFormMonto] = useState<string>("");
+  const [formDescripcion, setFormDescripcion] = useState("");
+  const [formTipo, setFormTipo] = useState<'Ingreso' | 'Gasto'>('Ingreso');
+  const [formDate, setFormDate] = useState<string>(formatDateToInput(new Date()));
+  const [ventaType, setVentaType] = useState<'servicio' | 'manual'>('servicio'); 
+  const [selectedServiceId, setSelectedServiceId] = useState<string>(''); 
+  // ===============================================
+
   /* =========================================================
-     FETCH DATA LOGIC
+    FETCH DATA LOGIC
   ========================================================= */
 
   const fetchDashboardData = async (userUid: string) => {
@@ -159,7 +184,7 @@ export const Dashboard: React.FC = () => {
     const startOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
 
     try {
-      // --- 1. Empleados/Clientes/Stock (Carga de listas)
+      // --- 1. Empleados/Clientes/Stock/Servicios (Carga de listas)
       
       const empSnap = await getDocs(collection(barberDb, `barber_users/${userUid}/empleados`));
       const empList = empSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Empleado));
@@ -169,7 +194,7 @@ export const Dashboard: React.FC = () => {
       const cliSnap = await getDocs(collection(barberDb, `barber_users/${userUid}/clientes`));
       const cliList = cliSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setTotalClientes(cliSnap.size);
-      setClientesList(cliList); 
+      setClientesList(cliList); // Usado internamente para almacenar la lista
 
       const stockSnap = await getDocs(collection(barberDb, `barber_users/${userUid}/stock`));
       let lowStock = 0;
@@ -180,6 +205,13 @@ export const Dashboard: React.FC = () => {
         }
       });
       setLowStockCount(lowStock);
+      
+      // CARGAR SERVICIOS (NECESARIO PARA EL POPUP DE VENTA)
+      const qServicios = query(collection(barberDb, `barber_users/${userUid}/servicios`), orderBy("nombre", "asc"));
+      const snapServicios = await getDocs(qServicios);
+      const serviciosList: Servicio[] = [];
+      snapServicios.forEach((d) => serviciosList.push({ id: d.id, ...d.data() } as Servicio));
+      setServicios(serviciosList);
 
 
       // --- 2. NETO DEL MES (VENTAS)
@@ -226,7 +258,8 @@ export const Dashboard: React.FC = () => {
         orderBy('createdAt', 'desc')
       );
       const recentSnap = await getDocs(qRecent);
-      const recentList = recentSnap.docs.slice(0, 8).map(doc => ({ id: doc.id, ...doc.data() } as Venta));
+      // Casting a 'Venta'
+      const recentList = recentSnap.docs.slice(0, 8).map(doc => ({ id: doc.id, ...doc.data() } as unknown as Venta)); 
       setRecentTransactions(recentList);
 
     } catch (error) {
@@ -258,9 +291,114 @@ export const Dashboard: React.FC = () => {
 
 
   /* =========================================================
-     GESTIÓN DE MODAL Y CLICK-OUTSIDE
+    LÓGICA DEL POPUP DE VENTA (Copiada de Ventas.tsx)
   ========================================================= */
-  const handleClickOutside = useCallback((event: MouseEvent) => {
+
+  const resetForm = useCallback(() => {
+    setCurrentId(null);
+    setFormMonto("");
+    setFormDescripcion("");
+    setFormTipo('Ingreso');
+    setFormDate(formatDateToInput(new Date())); 
+    
+    // Configuración de servicio por defecto (si hay servicios)
+    setVentaType('servicio');
+    const defaultServiceId = servicios[0]?.id || '';
+    setSelectedServiceId(defaultServiceId);
+
+    // Actualizar campos iniciales del formulario si hay servicio por defecto
+    const defaultService = servicios.find(s => s.id === defaultServiceId);
+    if (defaultService) {
+        setFormDescripcion(`Venta de Servicio: ${defaultService.nombre}`);
+        setFormMonto(defaultService.precio.toString());
+    } else {
+        setVentaType('manual'); // Si no hay servicios, forzar manual
+    }
+  }, [servicios]);
+
+  const openModal = () => {
+    resetForm();
+    setModalOpen(true);
+  };
+
+  const closeModal = useCallback(() => {
+    setModalOpen(false);
+    // No reseteamos aquí para mantener los datos si se cancela la edición, 
+    // pero sí lo hacemos al abrir uno nuevo.
+  }, []);
+
+  // Manejo de clicks fuera del modal
+  const handleClickOutsideModal = useCallback((event: MouseEvent) => {
+    if (modalOpen && modalRef.current && !modalRef.current.contains(event.target as Node)) {
+      closeModal();
+    }
+  }, [modalOpen, closeModal]);
+
+  useEffect(() => {
+    if (modalOpen) {
+      document.addEventListener('mousedown', handleClickOutsideModal);
+    } else {
+      document.removeEventListener('mousedown', handleClickOutsideModal);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutsideModal);
+  }, [modalOpen, handleClickOutsideModal]);
+
+  // Sincronizar formulario con selección de servicio
+  useEffect(() => {
+    if (ventaType === 'servicio' && selectedServiceId) {
+        const service = servicios.find(s => s.id === selectedServiceId);
+        if (service) {
+            setFormDescripcion(`Venta de Servicio: ${service.nombre}`);
+            setFormMonto(service.precio.toString());
+            setFormTipo('Ingreso');
+        }
+    } else if (ventaType === 'manual') {
+        // Al cambiar a manual, mantener tipo, limpiar descripción/monto si es nueva venta
+        if (!currentId) {
+            setFormDescripcion('');
+            setFormMonto('');
+        }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ventaType, selectedServiceId, servicios]);
+
+
+  const handleSave = async () => {
+    if (!uid || !formMonto || !formDescripcion.trim() || !formDate) return alert("Completa todos los campos.");
+
+    const montoNum = Number(formMonto);
+    if (isNaN(montoNum) || montoNum <= 0) return alert("El monto debe ser un número positivo.");
+
+    try {
+      const data = {
+        monto: montoNum, 
+        descripcion: formDescripcion.trim(),
+        tipo: formTipo,
+        date: formDate, 
+        servicioId: ventaType === 'servicio' && selectedServiceId ? selectedServiceId : null,
+        updatedAt: serverTimestamp(),
+      };
+
+      // Aquí solo añadimos, ya que en el Dashboard solo se hace Venta Rápida (no edición)
+      await addDoc(collection(barberDb, `barber_users/${uid}/ventas`), {
+          ...data,
+          createdAt: serverTimestamp(),
+      });
+
+      closeModal();
+      fetchDashboardData(uid!); // Recargar datos del dashboard
+    } catch (e) {
+      console.error(e);
+      alert("Error al registrar la transacción.");
+    }
+  };
+
+
+  /* =========================================================
+    OTROS HELPERS DEL DASHBOARD
+  ========================================================= */
+
+  const handleClickOutsideConfirm = useCallback((event: MouseEvent) => { // Renombrado para evitar conflicto con handleClickOutsideModal
     const modalElement = confirmModalRef.current;
     if (confirmOpen && modalElement && !modalElement.contains(event.target as Node)) {
       setConfirmOpen(false);
@@ -270,56 +408,55 @@ export const Dashboard: React.FC = () => {
 
   useEffect(() => {
     if (confirmOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('mousedown', handleClickOutsideConfirm);
     } else {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('mousedown', handleClickOutsideConfirm);
     }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [confirmOpen, handleClickOutside]);
-
-  /* =========================================================
-     ACCIONES RÁPIDAS (Finalizar/Cancelar Turno)
-  ========================================================= */
-
+    return () => document.removeEventListener('mousedown', handleClickOutsideConfirm);
+  }, [confirmOpen, handleClickOutsideConfirm]);
+  
   const triggerConfirm = (title: string, message: string, confirmText: string, isDanger: boolean, action: () => void) => {
     setConfirmConfig({ title, message, confirmText, isDanger, action });
     setConfirmOpen(true);
   };
+  
+  // ... (handleQuickFinalize, handleQuickCancel, getFilteredTurnos, timelineAppointments)
 
   const handleQuickFinalize = (turno: Turno) => {
-    setTurnoToAction(turno);
+    setTurnoToAction(turno); // Se mantiene para que el modal muestre la información
     triggerConfirm(
       "Confirmar Asistencia",
       `¿Deseas finalizar el turno de ${turno.clientName} (${turno.servicio})? Esto registrará la venta y sumará puntos de fidelidad.`,
       "Sí, finalizar",
       false, 
       async () => {
-        if (!uid || !turnoToAction) return;
+        // USAMOS EL OBJETO 'turno' DEL CLOSURE EN LUGAR DE 'turnoToAction' (estado)
+        if (!uid || !turno.id) return; 
         try {
             // 1. CREAR DOCUMENTO DE VENTA
             const ventaRef = await addDoc(collection(barberDb, `barber_users/${uid}/ventas`), {
-                monto: Number(turnoToAction.precio),
-                descripcion: `Venta - Turno: ${turnoToAction.servicio} de ${turnoToAction.clientName}`,
+                monto: Number(turno.precio), // Usando turno.precio
+                descripcion: `Venta - Turno: ${turno.servicio} de ${turno.clientName}`,
                 tipo: 'Ingreso',
                 date: todayDateStr, 
-                createdAt: serverTimestamp(),
+                createdAt: serverTimestamp(), 
             });
 
             // 2. ACTUALIZAR TURNO (Estado y ventaId)
-            await updateDoc(doc(barberDb, `barber_users/${uid}/turnos/${turnoToAction.id}`), {
+            await updateDoc(doc(barberDb, `barber_users/${uid}/turnos/${turno.id}`), { // Usando turno.id
                 estado: "completado",
                 ventaId: ventaRef.id, 
             });
 
             // 3. SUMAR PUNTO DE FIDELIDAD
-            if (turnoToAction.clientId) {
-                const clientRef = doc(barberDb, `barber_users/${uid}/clientes/${turnoToAction.clientId}`);
+            if (turno.clientId) { // Usando turno.clientId
+                const clientRef = doc(barberDb, `barber_users/${uid}/clientes/${turno.clientId}`);
                 await updateDoc(clientRef, { cortes: increment(1) });
             }
             
             setConfirmOpen(false);
             setTurnoToAction(null);
-            fetchDashboardData(uid!); // Refrescar el Dashboard
+            fetchDashboardData(uid!); 
         } catch (e) {
             console.error("Error al finalizar turno rápido", e);
             alert("Error al finalizar turno.");
@@ -329,33 +466,29 @@ export const Dashboard: React.FC = () => {
   };
 
   const handleQuickCancel = (turno: Turno) => {
-    setTurnoToAction(turno);
+    setTurnoToAction(turno); // Se mantiene para que el modal muestre la información
     triggerConfirm(
       "Cancelar Turno",
       `¿Estás seguro de cancelar el turno de ${turno.clientName} (${turno.servicio})?`,
       "Sí, cancelar",
       true, 
       async () => {
-        if (!uid || !turnoToAction) return;
+        // *** FIX CLAVE: USAMOS EL OBJETO 'turno' DEL CLOSURE EN LUGAR DE 'turnoToAction' (estado) ***
+        if (!uid || !turno.id) return; 
         try {
-            // Eliminar el turno
-            await deleteDoc(doc(barberDb, `barber_users/${uid}/turnos/${turnoToAction.id}`));
+            // Eliminar el turno - USANDO 'turno.id'
+            await deleteDoc(doc(barberDb, `barber_users/${uid}/turnos/${turno.id}`));
             
             setConfirmOpen(false);
             setTurnoToAction(null);
-            fetchDashboardData(uid!); // Refrescar el Dashboard
+            fetchDashboardData(uid!); 
         } catch (e) {
-            console.error("Error al cancelar turno rápido", e);
+            console.error("Error al cancelar turno rápido", e); // Si hay un error de Firebase, aparecerá aquí.
             alert("Error al cancelar turno.");
         }
       }
     );
   };
-
-
-  /* =========================================================
-     RENDER HELPERS
-  ========================================================= */
 
   const getFilteredTurnos = useMemo(() => {
     // Obtenemos solo los turnos PENDIENTES
@@ -375,38 +508,70 @@ export const Dashboard: React.FC = () => {
     return getFilteredTurnos;
   }, [getFilteredTurnos]);
 
-  const summaryCards = [
+  // Se define la data de las 5 tarjetas con su span de columna para la cuadrícula de 6 columnas (lg:grid-cols-6)
+  const finalSummaryCards = [
+    // 1. TURNOS PENDIENTES (3/6)
     {
-      label: "CLIENTES REGISTRADOS",
-      value: totalClientes === null ? "-" : totalClientes, 
-      helper: "Registrados en la cartera",
-      icon: "👥"
+      label: "TURNOS PENDIENTES",
+      path: "/barber-manager/turnos", // Ruta añadida
+      value: totalTurnosHoy === null ? "-" : todayTurnos.filter(t => t.estado === 'pendiente').length, // Solo pendientes
+      helper: "Pendientes de confirmar hoy",
+      icon: "📅",
+      colSpan: 3, // 50%
     },
-    {
-      label: "EMPLEADOS ACTIVOS",
-      value: totalEmpleados === null ? "-" : totalEmpleados,
-      helper: "Barberos en sistema",
-      icon: "💈"
-    },
+    // 2. NETO DEL MES (3/6)
     {
       label: "NETO DEL MES",
+      path: "/barber-manager/ventas", // Ruta añadida
       value: totalIngresosMes === null ? "-" : formatCurrency(totalIngresosMes),
       helper: `Acumulado al ${formatDateToInput(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0))}`, // Último día del mes
       icon: "💵",
-      color: totalIngresosMes !== null ? (totalIngresosMes >= 0 ? 'text-emerald-600' : 'text-red-600') : 'text-slate-900'
+      color: totalIngresosMes !== null ? (totalIngresosMes >= 0 ? 'text-emerald-600' : 'text-red-600') : 'text-slate-900',
+      colSpan: 3, // 50%
     },
+    // 3. INVENTARIO (LOW STOCK) (2/6)
     {
-      label: "TURNOS PENDIENTES",
-      value: totalTurnosHoy === null ? "-" : todayTurnos.filter(t => t.estado === 'pendiente').length, // Solo pendientes
-      helper: "Pendientes de confirmar hoy",
-      icon: "📅"
+        isInventory: true, // Indicador para lógica de renderizado especial
+        label: "INVENTARIO",
+        path: "/barber-manager/stock", // Ruta añadida
+        value: lowStockCount === null ? "-" : lowStockCount,
+        helper: lowStockCount === 0 ? "Todo en orden" : (lowStockCount === null ? "Cargando..." : "Productos requieren reposición"),
+        lowStock: lowStockCount,
+        colSpan: 2, // 33.3%
+    },
+    // 4. CLIENTES REGISTRADOS (2/6)
+    {
+      label: "CLIENTES REGISTRADOS",
+      path: "/barber-manager/clientes", // Ruta añadida
+      value: totalClientes === null ? "-" : totalClientes, 
+      helper: "Registrados en la cartera",
+      icon: "👥",
+      colSpan: 2, // 33.3%
+    },
+    // 5. EMPLEADOS ACTIVOS (2/6)
+    {
+      label: "EMPLEADOS ACTIVOS",
+      path: "/barber-manager/empleados", // Ruta añadida
+      value: totalEmpleados === null ? "-" : totalEmpleados,
+      helper: "Barberos en sistema",
+      icon: "💈",
+      colSpan: 2, // 33.3%
     },
   ];
 
+  const navigateToSection = (path: string) => {
+    navigate(path);
+  }
+
 
   /* =========================================================
-     RENDER
+    RENDER
   ========================================================= */
+  const inputClass = "w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-slate-800 focus:border-transparent outline-none transition-all text-sm";
+  const btnPrimary = "w-full py-2.5 bg-slate-900 text-white rounded-lg hover:bg-slate-800 active:scale-[0.98] transition font-medium text-sm";
+  const btnSecondary = "w-full py-2.5 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 active:scale-[0.98] transition font-medium text-sm";
+
+
   return (
     <div className="space-y-6 animate-fadeIn m-2 pb-16">
       
@@ -421,8 +586,8 @@ export const Dashboard: React.FC = () => {
           </p>
         </div>
         <button 
-          onClick={() => navigate("/barber-manager/ventas")}
-          className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-md active:scale-95 whitespace-nowrap"
+          onClick={openModal} // LLAMAR AL POPUP EN LUGAR DE NAVEGAR
+          className="flex items-center cursor-pointer gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-md active:scale-95 whitespace-nowrap"
         >
           <IconAdd />
           Venta Rápida
@@ -430,77 +595,71 @@ export const Dashboard: React.FC = () => {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Low Stock Card (Fixed Position) */}
-        <div 
-            className={`bg-white rounded-2xl shadow-sm border px-5 py-4 flex flex-col justify-between 
-                        ${lowStockCount === null ? 'border-slate-200' : (lowStockCount > 0 ? 'border-red-400 ring-1 ring-red-400/50' : 'border-emerald-400 ring-1 ring-emerald-400/50')}`}
-        >
-            <div className="flex items-center justify-between mb-4">
-                <div>
-                    <p className="text-xs font-medium text-slate-500 tracking-wide">
-                        INVENTARIO
-                    </p>
-                    <p className={`mt-2 text-2xl font-semibold ${lowStockCount === null || lowStockCount === 0 ? 'text-slate-900' : 'text-red-600'}`}>
-                        {lowStockCount === null ? "-" : lowStockCount}
-                    </p>
-                </div>
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${lowStockCount === null || lowStockCount === 0 ? 'bg-slate-100 text-slate-700' : 'bg-red-100 text-red-600'}`}>
-                    <IconAlert />
-                </div>
-            </div>
-            <p className="text-xs text-slate-500">
-                {lowStockCount === 0 ? "Todo en orden" : (lowStockCount === null ? "Cargando..." : "Productos requieren reposición")}
-            </p>
-        </div>
+      {/* CUADRÍCULA AJUSTADA A 6 COLUMNAS PARA ESCRITORIO */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
         
-        {/* Dynamic Cards */}
-        {summaryCards.slice(0, 3).map((card) => (
-          <div
-            key={card.label}
-            className="bg-white rounded-2xl shadow-sm border border-slate-200 px-5 py-4 flex flex-col justify-between"
-          >
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <p className="text-xs font-medium text-slate-500 tracking-wide">
-                  {card.label}
-                </p>
-                <p className={`mt-2 text-2xl font-semibold ${card.color || 'text-slate-900'}`}>
-                  {card.value}
-                </p>
-              </div>
+        {finalSummaryCards.map((card, index) => {
+            
+            // Clase de ancho de columna para desktop
+            const colSpanClass = card.colSpan ? `lg:col-span-${card.colSpan}` : 'lg:col-span-1';
+            
+            const cardClasses = `bg-white rounded-2xl shadow-sm border px-5 py-4 flex flex-col justify-between transition-all cursor-pointer hover:shadow-lg
+                                 ${colSpanClass}`;
 
-              <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-700 text-lg">
-                {card.icon}
-              </div>
-            </div>
+            // Lógica específica para la tarjeta de Inventario (Low Stock)
+            if (card.isInventory) {
+                return (
+                    <div 
+                        key={index}
+                        onClick={() => navigateToSection(card.path)} // Navegación
+                        className={`${cardClasses} ${card.lowStock === null ? 'border-slate-200' : (card.lowStock > 0 ? 'border-red-400 ring-1 ring-red-400/50' : 'border-emerald-400 ring-1 ring-emerald-400/50')}`}
+                    >
+                        <div className="flex items-center justify-between mb-4">
+                            <div>
+                                <p className="text-xs font-medium text-slate-500 tracking-wide">
+                                    {card.label}
+                                </p>
+                                <p className={`mt-2 text-2xl font-semibold ${card.lowStock === null || card.lowStock === 0 ? 'text-slate-900' : 'text-red-600'}`}>
+                                    {card.value}
+                                </p>
+                            </div>
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${card.lowStock === null || card.lowStock === 0 ? 'bg-slate-100 text-slate-700' : 'bg-red-100 text-red-600'}`}>
+                                <IconAlert />
+                            </div>
+                        </div>
+                        <p className="text-xs text-slate-500">
+                            {card.helper}
+                        </p>
+                    </div>
+                );
+            }
 
-            <p className="text-xs text-slate-500">{card.helper}</p>
-          </div>
-        ))}
+            // Renderizado de las tarjetas dinámicas restantes
+            return (
+                <div
+                    key={card.label}
+                    onClick={() => navigateToSection(card.path)} // Navegación
+                    className={`${cardClasses} border-slate-200`}
+                >
+                    <div className="flex items-center justify-between mb-4">
+                        <div>
+                            <p className="text-xs font-medium text-slate-500 tracking-wide">
+                                {card.label}
+                            </p>
+                            <p className={`mt-2 text-2xl font-semibold ${card.color || 'text-slate-900'}`}>
+                                {card.value}
+                            </p>
+                        </div>
 
-        {/* Turnos Card (Pendientes) */}
-        <div
-            key={summaryCards[3].label}
-            className="bg-white rounded-2xl shadow-sm border border-slate-200 px-5 py-4 flex flex-col justify-between"
-        >
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <p className="text-xs font-medium text-slate-500 tracking-wide">
-                  {summaryCards[3].label}
-                </p>
-                <p className={`mt-2 text-2xl font-semibold ${summaryCards[3].color || 'text-slate-900'}`}>
-                  {summaryCards[3].value}
-                </p>
-              </div>
+                        <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-700 text-lg">
+                            {card.icon}
+                        </div>
+                    </div>
 
-              <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-700 text-lg">
-                {summaryCards[3].icon}
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-500">{summaryCards[3].helper}</p>
-        </div>
+                    <p className="text-xs text-slate-500">{card.helper}</p>
+                </div>
+            );
+        })}
         
       </div>
 
@@ -517,7 +676,7 @@ export const Dashboard: React.FC = () => {
               </h3>
             </div>
 
-            <button onClick={() => navigate("/barber-manager/ventas")} className="text-xs font-medium text-emerald-600 hover:text-emerald-700">
+            <button onClick={() => navigate("/barber-manager/ventas")} className="text-xs font-medium cursor-pointer text-emerald-600 hover:text-emerald-700">
               Ver todas
             </button>
           </div>
@@ -536,7 +695,8 @@ export const Dashboard: React.FC = () => {
                         
                         return (
                             <div
-                                key={item.createdAt.seconds || index}
+                                // Se usa index como fallback si createdAt no es único o no tiene seconds
+                                key={item.id || index} 
                                 className="flex items-center justify-between rounded-xl px-3 py-2 hover:bg-slate-50 transition"
                             >
                                 <div className="flex items-center gap-3">
@@ -580,7 +740,7 @@ export const Dashboard: React.FC = () => {
               <select
                 value={selectedBarberId}
                 onChange={(e) => setSelectedBarberId(e.target.value)}
-                className="px-2 py-1 rounded-md border border-slate-200 text-slate-700 text-xs focus:ring-slate-800"
+                className="px-2 py-1 rounded-md border cursor-pointer border-slate-200 text-slate-700 text-xs focus:ring-slate-800"
               >
                 <option value="all">General</option>
                 {empleadosList.map(emp => (
@@ -592,7 +752,7 @@ export const Dashboard: React.FC = () => {
 
           <div className="flex-1 overflow-y-auto custom-scrollbar px-5 py-3 space-y-3">
             {loadingLists ? (
-                 <div className="text-center py-12 text-sm text-slate-500">Cargando turnos...</div>
+                   <div className="text-center py-12 text-sm text-slate-500">Cargando turnos...</div>
             ) : timelineAppointments.length === 0 ? (
                 <div className="text-center py-12 text-sm text-slate-400">No hay turnos pendientes para {selectedBarberId === 'all' ? 'hoy' : 'este barbero'}.</div>
             ) : (
@@ -613,14 +773,14 @@ export const Dashboard: React.FC = () => {
                             <div className="flex gap-2">
                                 <button 
                                     onClick={() => handleQuickFinalize(turno)}
-                                    className="p-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition active:scale-95"
+                                    className="p-2 cursor-pointer bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition active:scale-95"
                                     title="Finalizar Turno"
                                 >
                                     <IconCheck />
                                 </button>
                                 <button 
                                     onClick={() => handleQuickCancel(turno)}
-                                    className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition active:scale-95"
+                                    className="p-2 cursor-pointer bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition active:scale-95"
                                     title="Cancelar Turno"
                                 >
                                     <IconTrash />
@@ -635,7 +795,167 @@ export const Dashboard: React.FC = () => {
       </div>
 
       {/* =========================================
-          MODAL DE CONFIRMACIÓN CUSTOM
+          MODAL DE VENTA RÁPIDA (Copiado de Ventas.tsx)
+      ========================================= */}
+      {modalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+          <div 
+            ref={modalRef}
+            className="bg-white rounded-2xl w-full max-w-md p-6 shadow-xl animate-fadeIn"
+            onClick={(e) => e.stopPropagation()} // Detener propagación para click-outside
+          >
+            <h3 className="text-lg font-semibold text-slate-900 mb-4">
+              Nueva Venta Rápida
+            </h3>
+            
+            <div className="space-y-4">
+              
+              {/* Tipo de Transacción (Ingreso/Gasto) */}
+              <div>
+                <label className="text-xs font-medium text-slate-600 mb-1 block">Tipo de Monto</label>
+                <div className="flex space-x-4">
+                  <button 
+                    onClick={() => setFormTipo('Ingreso')}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 cursor-pointer ${
+                      formTipo === 'Ingreso' 
+                        ? 'bg-emerald-50 border-emerald-500 text-emerald-800' 
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    Ingreso (+)
+                  </button>
+                  <button 
+                    onClick={() => setFormTipo('Gasto')}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 cursor-pointer ${
+                      formTipo === 'Gasto' 
+                        ? 'bg-red-50 border-red-500 text-red-800' 
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    Gasto (-)
+                  </button>
+                </div>
+              </div>
+              
+              {/* Selector de Venta (Servicio vs Manual) */}
+              {formTipo === 'Ingreso' && (
+                <div className="border-t border-slate-100 pt-4">
+                    <label className="text-xs font-medium text-slate-600 mb-1 block">Origen del Ingreso</label>
+                    <div className="flex space-x-4 mb-3">
+                        <button 
+                            onClick={() => { setVentaType('servicio'); setSelectedServiceId(servicios[0]?.id || ''); }}
+                            className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors border-2 cursor-pointer ${
+                                ventaType === 'servicio' 
+                                    ? 'bg-slate-800 border-slate-900 text-white' 
+                                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                            }`}
+                            disabled={servicios.length === 0}
+                        >
+                            Venta de Servicio
+                        </button>
+                        <button 
+                            onClick={() => { setVentaType('manual'); setSelectedServiceId(''); }}
+                            className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors border-2 cursor-pointer ${
+                                ventaType === 'manual' 
+                                    ? 'bg-slate-800 border-slate-900 text-white' 
+                                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                            }`}
+                        >
+                            Venta/Ingreso Manual
+                        </button>
+                    </div>
+
+                    {/* Selector de Servicio (solo si es tipo Ingreso y Venta de Servicio) */}
+                    {ventaType === 'servicio' && servicios.length > 0 && (
+                        <div>
+                            <select
+                                value={selectedServiceId}
+                                onChange={(e) => setSelectedServiceId(e.target.value)}
+                                className={inputClass + ' cursor-pointer'}
+                            >
+                                {servicios.map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                        {s.nombre} - {formatCurrency(s.precio)}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
+                    {ventaType === 'servicio' && servicios.length === 0 && (
+                        <p className="text-xs text-red-500 mt-1">No hay servicios registrados. Usa el modo manual.</p>
+                    )}
+                </div>
+              )}
+              
+              {/* Fecha de Registro */}
+              <div className="border-t border-slate-100 pt-4">
+                <label className="text-xs font-medium text-slate-600 mb-1 block">Fecha de Transacción</label>
+                <input 
+                  type="date" 
+                  value={formDate} 
+                  onChange={(e) => setFormDate(e.target.value)} 
+                  className={inputClass + ' cursor-pointer'}
+                  max={formatDateToInput(new Date())} // No permitir fechas futuras
+                />
+              </div>
+
+              {/* Monto (solo editable en modo manual o gasto) */}
+              {(ventaType === 'manual' || formTipo === 'Gasto') ? (
+                <div>
+                  <label className="text-xs font-medium text-slate-600 mb-1 block">Monto</label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 text-sm">$</span>
+                    <input 
+                      type="number" 
+                      value={formMonto} 
+                      onChange={(e) => setFormMonto(e.target.value)} 
+                      className={`${inputClass} pl-6 font-medium ${formTipo === 'Ingreso' ? 'text-emerald-700' : 'text-red-700'}`}
+                      placeholder="0.00" 
+                      min="0"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                    <p className="text-xs text-slate-500">Monto del servicio</p>
+                    <p className={`font-bold text-lg ${formTipo === 'Ingreso' ? 'text-emerald-700' : 'text-red-700'}`}>
+                        {formatCurrency(Number(formMonto || 0))}
+                    </p>
+                </div>
+              )}
+
+              {/* Descripción (siempre editable, pero auto-rellenable) */}
+              <div>
+                <label className="text-xs font-medium text-slate-600 mb-1 block">Descripción</label>
+                <textarea 
+                  rows={2}
+                  value={formDescripcion} 
+                  onChange={(e) => setFormDescripcion(e.target.value)} 
+                  className={inputClass}
+                  placeholder={formTipo === 'Ingreso' ? "Venta o Ingreso Extra" : "Compra de productos para stock"} 
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button 
+                  onClick={closeModal}
+                  className={btnSecondary + ' cursor-pointer'}
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={handleSave}
+                  className={btnPrimary + ' cursor-pointer'}
+                >
+                  Registrar Transacción
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* =========================================
+          MODAL DE CONFIRMACIÓN CUSTOM (Mantener la lógica si es necesario)
       ========================================= */}
       {confirmOpen && (
         <div 
@@ -662,13 +982,13 @@ export const Dashboard: React.FC = () => {
             <div className="flex gap-3">
               <button 
                 onClick={() => setConfirmOpen(false)}
-                className="flex-1 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 font-medium text-sm transition"
+                className="flex-1 py-2.5 bg-white border cursor-pointer border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 font-medium text-sm transition"
               >
                 Cancelar
               </button>
               <button 
                 onClick={confirmConfig.action}
-                className={`flex-1 py-2.5 rounded-lg text-white font-bold text-sm shadow-sm active:scale-95 transition ${
+                className={`flex-1 py-2.5 rounded-lg text-white font-bold text-sm shadow-sm active:scale-95 transition cursor-pointer ${
                   confirmConfig.isDanger 
                     ? "bg-red-600 hover:bg-red-700" 
                     : "bg-emerald-600 hover:bg-emerald-700" // Usamos esmeralda para acciones que no son peligro

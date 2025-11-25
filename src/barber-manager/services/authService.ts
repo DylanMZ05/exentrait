@@ -3,9 +3,9 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
-  UserCredential,
   signOut,
 } from "firebase/auth";
+import type { UserCredential } from "firebase/auth"; // ERROR TS1484 CORREGIDO: Importar como tipo
 
 import {
   collection,
@@ -18,13 +18,13 @@ import {
 import { barberAuth, barberDb } from "./firebaseBarber";
 
 /* ============================================
-   COLECCIÓN PRINCIPAL DEL BARBER MANAGER
-   (coincide con tus reglas de seguridad)
+    COLECCIÓN PRINCIPAL DEL BARBER MANAGER
+    (coincide con tus reglas de seguridad)
 ============================================ */
 const usersCol = collection(barberDb, "barber_users");
 
 /* ============================================
-   REGISTRO DE USUARIO (Dueño / Owner)
+    REGISTRO DE USUARIO (Dueño / Owner)
 ============================================ */
 export const registerBarberUser = async (
   email: string,
@@ -43,9 +43,9 @@ export const registerBarberUser = async (
   await setDoc(ref, {
     uid: cred.user.uid,
     email,
-    role: "owner",               // 🔥 necesario para que pueda crear empleados
+    role: "owner", // 🔥 necesario para que pueda crear empleados
     activo: true,
-    porcentaje: 0,               // dueño no cobra %, pero se puede dejar
+    porcentaje: 0, // dueño no cobra %, pero se puede dejar
     origen: "signup-barber",
     creadoEn: serverTimestamp(),
     actualizadoEn: serverTimestamp(),
@@ -55,7 +55,7 @@ export const registerBarberUser = async (
 };
 
 /* ============================================
-   LOGIN
+    LOGIN
 ============================================ */
 export const loginBarberUser = async (email: string, password: string) => {
   const cred = await signInWithEmailAndPassword(barberAuth, email, password);
@@ -82,7 +82,7 @@ export const loginBarberUser = async (email: string, password: string) => {
 };
 
 /* ============================================
-   RECUPERAR CONTRASEÑA
+    RECUPERAR CONTRASEÑA
 ============================================ */
 export const sendBarberPasswordReset = async (email: string) => {
   await sendPasswordResetEmail(barberAuth, email);

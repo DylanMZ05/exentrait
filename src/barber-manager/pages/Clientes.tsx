@@ -7,14 +7,14 @@ import {
   deleteDoc,
   updateDoc,
   doc,
-  serverTimestamp,
+  serverTimestamp, // Se importa y se usa para createdAt y updatedAt
   query,
-  orderBy,
+  orderBy, // Se importa y se usa en loadClientes
 } from "firebase/firestore";
 import { barberDb, barberAuth } from "../services/firebaseBarber";
 
 /* ============================================================
-   ICONOS SVG
+    ICONOS SVG
 ============================================================ */
 const IconSearch = () => (
   <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -28,11 +28,15 @@ const IconPlus = () => (
   </svg>
 );
 
+// ERROR CORREGIDO: IconPhone no se usa en el JSX, por lo tanto se elimina 
+// o se comenta para evitar TS6133.
+/*
 const IconPhone = () => (
   <svg className="w-3.5 h-3.5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
   </svg>
 );
+*/
 
 const IconEdit = () => (
   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -53,7 +57,7 @@ const IconWhatsApp = () => (
 );
 
 /* ============================================================
-   COMPONENTE PRINCIPAL
+    COMPONENTE PRINCIPAL
 ============================================================ */
 export const Clientes: React.FC = () => {
   const user = barberAuth.currentUser;
@@ -80,7 +84,7 @@ export const Clientes: React.FC = () => {
   const [selectedClient, setSelectedClient] = useState<any>(null);
 
   /* ============================================================
-     CARGAR CLIENTES
+    CARGAR CLIENTES
   ============================================================ */
   const loadClientes = async () => {
     if (!uid) return;
@@ -109,7 +113,7 @@ export const Clientes: React.FC = () => {
   }, [uid]);
 
   /* ============================================================
-     CRUD & LÓGICA
+    CRUD & LÓGICA
   ============================================================ */
   const handleCreate = async () => {
     if (!nombre.trim()) return alert("El nombre es obligatorio");
@@ -167,7 +171,7 @@ export const Clientes: React.FC = () => {
   };
 
   /* ============================================================
-     SISTEMA DE PUNTOS
+    SISTEMA DE PUNTOS
   ============================================================ */
   const updateCortes = async (client: any, change: number) => {
     if (!uid) return;
@@ -192,7 +196,7 @@ export const Clientes: React.FC = () => {
   };
 
   /* ============================================================
-     WHATSAPP HELPER
+    WHATSAPP HELPER
   ============================================================ */
   const getWhatsAppLink = (phone: string) => {
     const cleanNumber = phone.replace(/\D/g, "");
@@ -225,7 +229,7 @@ export const Clientes: React.FC = () => {
   };
 
   /* ============================================================
-     FILTRADO
+    FILTRADO
   ============================================================ */
   const filteredClients = clientes.filter(c => 
     c.nombre.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -351,7 +355,7 @@ export const Clientes: React.FC = () => {
 
                   {/* Botones contador */}
                   <div className="flex items-center justify-between gap-3">
-                     <button 
+                      <button 
                         onClick={() => updateCortes(client, -1)}
                         className="flex-1 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900 text-xs font-medium transition"
                       >
@@ -359,12 +363,12 @@ export const Clientes: React.FC = () => {
                       </button>
 
                       {esGratis ? (
-                         <button 
-                           onClick={() => updateCortes(client, -10)} // Resetear
-                           className="flex-[2] py-1.5 rounded-lg bg-yellow-400 text-yellow-900 hover:bg-yellow-500 text-xs font-bold transition shadow-sm animate-pulse"
-                         >
-                           CANJEAR
-                         </button>
+                          <button 
+                            onClick={() => updateCortes(client, -10)} // Resetear
+                            className="flex-[2] py-1.5 rounded-lg bg-yellow-400 text-yellow-900 hover:bg-yellow-500 text-xs font-bold transition shadow-sm animate-pulse"
+                          >
+                            CANJEAR
+                          </button>
                       ) : (
                         <div className="flex-[2] text-center text-[10px] text-slate-400 font-medium">
                           {10 - cortesActuales} para gratis
@@ -433,15 +437,15 @@ export const Clientes: React.FC = () => {
               </div>
 
               {!createModalOpen && (
-                 <div>
-                    <label className="text-xs font-medium text-slate-600 mb-1 block">Ajuste manual de cortes</label>
-                    <input 
-                      type="number" 
-                      value={cortes} 
-                      onChange={(e) => setCortes(Number(e.target.value))} 
-                      className={inputClass}
-                    />
-                 </div>
+                  <div>
+                      <label className="text-xs font-medium text-slate-600 mb-1 block">Ajuste manual de cortes</label>
+                      <input 
+                        type="number" 
+                        value={cortes} 
+                        onChange={(e) => setCortes(Number(e.target.value))} 
+                        className={inputClass}
+                      />
+                  </div>
               )}
 
               <div>

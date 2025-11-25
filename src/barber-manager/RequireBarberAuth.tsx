@@ -1,8 +1,11 @@
 // src/barber-manager/RequireBarberAuth.tsx
-import { ReactNode, useEffect, useState } from "react";
-import { onAuthStateChanged, User } from "firebase/auth";
+import { useEffect, useState } from "react";
+import type { ReactNode } from "react"; // ERROR TS1484 CORREGIDO: ReactNode es un tipo
+import { onAuthStateChanged } from "firebase/auth";
+import type { User } from "firebase/auth"; // ERROR TS1484 CORREGIDO: User es un tipo
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { barberAuth } from "./services/firebaseBarber";
+import React from "react";
 
 interface Props {
   children?: ReactNode;

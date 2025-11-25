@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Link, useLocation } from "react-router-dom";
 import logo from "../assets/logo-2.png"; 
 
@@ -12,7 +12,8 @@ const menuItems = [
 // ICONOS HAMBURGUESA Y CIERRE (SVG)
 const MenuIcon = ({ isOpen, onClick }: { isOpen: boolean; onClick: () => void }) => (
   <button 
-    className="cursor-pointer w-8 h-8 flex flex-col justify-around relative focus:outline-none z-50 transition-transform duration-300 ease-in-out"
+    // Ahora solo visible en pantallas pequeñas
+    className="cursor-pointer w-8 h-8 flex flex-col justify-around relative focus:outline-none z-50 transition-transform duration-300 ease-in-out lg:hidden"
     onClick={onClick}
     aria-label="Toggle Menu"
   >
@@ -112,14 +113,33 @@ export default function Header() {
           />
         </Link>
         
-        {/* Toggle Hamburguesa */}
-        <div className="z-50">
+        {/* =========================================================
+            MENU DE ESCRITORIO (LG) - CON SEPARADOR SUTIL
+        ========================================================= */}
+        <nav className="hidden lg:flex items-center">
+          {menuItems.map((item, index) => (
+            <Link
+              key={item.path}
+              to={item.path}
+              className={`
+                text-white text-base font-medium transition-colors hover:text-gray-300 
+                px-4 py-1 
+                ${index < menuItems.length - 1 ? 'border-r border-slate-700/50' : ''} // Borde sutil a la derecha
+              `}
+            >
+              {item.name}
+            </Link>
+          ))}
+        </nav>
+
+        {/* Toggle Hamburguesa (Solo Móvil) */}
+        <div className="z-50 lg:hidden">
           <MenuIcon isOpen={isMenuOpen} onClick={() => setIsMenuOpen(!isMenuOpen)} />
         </div>
       </div>
       
       {/* =========================================================
-          MENÚ LATERAL (SIDE DRAWER)
+          MENÚ LATERAL (SIDE DRAWER) - SOLO PARA MÓVIL
       ========================================================= */}
       {/* Overlay para cerrar al tocar fuera */}
       {isMenuOpen && (

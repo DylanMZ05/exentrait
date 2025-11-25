@@ -1,5 +1,3 @@
-import React from 'react';
-
 /* ============================================================
    ICONOS SVG COMPARTIDOS (Exportados para uso modular)
 ============================================================ */

@@ -1,5 +1,6 @@
 // src/barber-manager/services/firebaseBarber.ts
-import { initializeApp, getApps, FirebaseApp } from "firebase/app";
+import { initializeApp, getApps } from "firebase/app";
+import type { FirebaseApp } from "firebase/app"; // ERROR TS1484 CORREGIDO: Importar como tipo
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
