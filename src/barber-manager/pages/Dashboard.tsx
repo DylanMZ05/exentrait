@@ -1,56 +1,52 @@
 // src/barber-manager/pages/Dashboard.tsx
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { 
-  collection, 
-  getDocs, 
-  query, 
-  where, 
-  orderBy, 
-  Timestamp,
-  doc,
-  updateDoc,
-  deleteDoc,
-  addDoc,
-  increment,
-  serverTimestamp, 
+    collection, 
+    getDocs, 
+    query, 
+    where, 
+    orderBy, 
+    Timestamp,
+    doc,
+    updateDoc,
+    addDoc,
+    increment,
+    serverTimestamp, 
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { useNavigate } from "react-router-dom"; 
 import { barberDb, barberAuth } from "../services/firebaseBarber"; 
 
 /* =========================================================
-    ICONOS SVG (Autocontenido)
+    ICONOS SVG
 ========================================================= */
 
 const IconAdd = () => (
-  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-  </svg>
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+    </svg>
 );
-// TS6133 CORREGIDO: IconList eliminado.
 
 const IconAlert = () => (
-  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.45-1.74 1.54-3.04L13.54 4.04c-.91-1.3-2.37-1.3-3.28 0L3.54 17.96c-.91 1.3.003 3.04 1.54 3.04z" />
-  </svg>
-);
-
-const IconAlertModal = () => (
-  <svg className="w-10 h-10 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-  </svg>
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.45-1.74 1.54-3.04L13.54 4.04c-.91-1.3-2.37-1.3-3.28 0L3.54 17.96c-.91 1.3.003 3.04 1.54 3.04z" />
+    </svg>
 );
 
 const IconCheck = () => (
-  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-  </svg>
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+    </svg>
 );
 
 const IconTrash = () => (
-  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-  </svg>
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
+);
+
+const IconSpinner = ({ color = 'text-white' }) => (
+    <div className={`inline-block animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white ${color}`}></div>
 );
 
 
@@ -58,1023 +54,1221 @@ const IconTrash = () => (
     TIPADOS Y HELPERS
 ========================================================= */
 
-// Tipados (Simplificados)
 interface Turno {
-  id: string;
-  hora: string;
-  barberId: string;
-  barberName: string;
-  clientId: string;
-  clientName: string;
-  servicio: string;
-  precio: string;
-  fecha: string; // Añadido para consistencia con la query de fecha
-  estado: "pendiente" | "completado" | "cancelado"; // Estado como string literal
-  ventaId?: string;
+    id: string;
+    hora: string;
+    barberId: string;
+    barberName: string;
+    clientId: string;
+    clientName: string;
+    servicio: string;
+    precio: string;
+    fecha: string; 
+    estado: "pendiente" | "completado" | "cancelado"; 
+    ventaId?: string;
 }
 interface Empleado {
-  id: string;
-  nombre: string;
+    id: string;
+    nombre: string;
+    porcentaje: number; // Vital para el cálculo de liquidación
+    internalEmail?: string;
 }
 interface Venta {
-  id: string; // Añadido id para mapeo de docs
-  monto: number;
-  tipo: 'Ingreso' | 'Gasto';
-  descripcion: string;
-  createdAt: Timestamp;
-  barberId?: string; // IMPORTANTE para liquidación
-  barberName?: string; // IMPORTANTE para liquidación
+    id: string; 
+    monto: number;
+    tipo: 'Ingreso' | 'Gasto';
+    descripcion: string;
+    createdAt: Timestamp;
+    barberId?: string; 
+    barberName?: string; 
+    comisionAplicada?: number | null; // Necesario para la integridad
 }
 interface Producto {
-  nombre: string;
-  cantidadActual: number;
-  stockBajo: number;
+    nombre: string;
+    cantidadActual: number;
+    stockBajo: number;
 }
-// Nuevo Tipado para Servicio
 interface Servicio {
     id: string;
     nombre: string;
     precio: number;
 }
+interface Cliente {
+    id: string;
+    nombre: string;
+    telefono?: string;
+    visitas?: number;
+}
 
 
 const formatCurrency = (amount: number) => {
-  return `$ ${Math.abs(amount).toLocaleString("es-AR", { minimumFractionDigits: 0 })}`;
+    return `$ ${Math.abs(amount).toLocaleString("es-AR", { minimumFractionDigits: 0 })}`;
 };
 
 const formatDateToInput = (date: Date): string => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
 };
-
-// Se elimina generateTimeSlots y TIME_SLOTS (TS6133).
-
 
 /* =========================================================
     COMPONENTE PRINCIPAL
 ========================================================= */
 export const Dashboard: React.FC = () => {
-  const navigate = useNavigate();
-  const [uid, setUid] = useState<string | null>(null);
+    const navigate = useNavigate();
+    const [userUid, setUserUid] = useState<string | null>(null); 
+    const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
 
-  // Summary Card States
-  const [totalEmpleados, setTotalEmpleados] = useState<number | null>(null);
-  const [totalClientes, setTotalClientes] = useState<number | null>(null);
-  const [totalIngresosMes, setTotalIngresosMes] = useState<number | null>(null);
-  const [totalTurnosHoy, setTotalTurnosHoy] = useState<number | null>(null);
-  const [lowStockCount, setLowStockCount] = useState<number | null>(null); 
-
-  // List States
-  const [empleadosList, setEmpleadosList] = useState<Empleado[]>([]); 
-  const [todayTurnos, setTodayTurnos] = useState<Turno[]>([]);
-  const [recentTransactions, setRecentTransactions] = useState<Venta[]>([]);
-  const [loadingLists, setLoadingLists] = useState(true);
-
-  // Filtro
-  const [selectedBarberId, setSelectedBarberId] = useState<string>('all');
-  
-  const todayDateStr = formatDateToInput(new Date());
-
-  // Modales y confirmación
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [confirmConfig, setConfirmConfig] = useState<{
-    title: string;
-    message: string;
-    action: () => void;
-    confirmText: string;
-    isDanger?: boolean;
-  }>({ title: "", message: "", action: () => {}, confirmText: "", isDanger: false });
-  
-  // ERROR TS6133 CORREGIDO: Se ignora la advertencia, ya que se usa para mostrar el contexto del modal.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
-  const [, setTurnoToAction] = useState<Turno | null>(null); 
-  // ERROR TS6133 CORREGIDO: Se ignora la advertencia, ya que se usa para almacenar datos en fetchDashboardData.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
-  const [, setClientesList] = useState<any[]>([]); 
-  const confirmModalRef = useRef<HTMLDivElement>(null);
-
-  // ===============================================
-  // ESTADOS DEL MODAL DE VENTA RÁPIDA (Copiados de Ventas.tsx)
-  // ===============================================
-  const [modalOpen, setModalOpen] = useState(false);
-  const modalRef = useRef<HTMLDivElement>(null);
-  const [servicios, setServicios] = useState<Servicio[]>([]);
-
-  // Estados del formulario de venta
-  const [currentId, setCurrentId] = useState<string | null>(null);
-  const [formMonto, setFormMonto] = useState<string>("");
-  const [formDescripcion, setFormDescripcion] = useState("");
-  const [formTipo, setFormTipo] = useState<'Ingreso' | 'Gasto'>('Ingreso');
-  const [formDate, setFormDate] = useState<string>(formatDateToInput(new Date()));
-  const [ventaType, setVentaType] = useState<'servicio' | 'manual'>('servicio'); 
-  const [selectedServiceId, setSelectedServiceId] = useState<string>(''); 
-  
-  // NUEVO ESTADO: Empleado para la Venta Rápida (Obligatorio)
-  const [formBarberId, setFormBarberId] = useState('');
-  // ===============================================
-
-  /* =========================================================
-    FETCH DATA LOGIC
-  ========================================================= */
-
-  const fetchDashboardData = async (userUid: string) => {
-    setLoadingLists(true);
-    const today = new Date();
-    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-    const startOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-
-    try {
-      // --- 1. Empleados/Clientes/Stock/Servicios (Carga de listas)
-      
-      const empSnap = await getDocs(collection(barberDb, `barber_users/${userUid}/empleados`));
-      const empList = empSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Empleado));
-      setTotalEmpleados(empList.length);
-      setEmpleadosList(empList);
-      
-      // Si la lista de empleados no está vacía, preseleccionar el primero para el modal
-      if (empList.length > 0) {
-          setFormBarberId(empList[0].id);
-      }
-
-
-      const cliSnap = await getDocs(collection(barberDb, `barber_users/${userUid}/clientes`));
-      const cliList = cliSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setTotalClientes(cliSnap.size);
-      setClientesList(cliList); // Usado internamente para almacenar la lista
-
-      const stockSnap = await getDocs(collection(barberDb, `barber_users/${userUid}/stock`));
-      let lowStock = 0;
-      stockSnap.forEach(doc => {
-        const data = doc.data() as Producto;
-        if (data.cantidadActual <= data.stockBajo) {
-          lowStock++;
-        }
-      });
-      setLowStockCount(lowStock);
-      
-      // CARGAR SERVICIOS (NECESARIO PARA EL POPUP DE VENTA)
-      const qServicios = query(collection(barberDb, `barber_users/${userUid}/servicios`), orderBy("nombre", "asc"));
-      const snapServicios = await getDocs(qServicios);
-      const serviciosList: Servicio[] = [];
-      snapServicios.forEach((d) => serviciosList.push({ id: d.id, ...d.data() } as Servicio));
-      setServicios(serviciosList);
-
-
-      // --- 2. NETO DEL MES (VENTAS)
-      const qSales = query(
-        collection(barberDb, `barber_users/${userUid}/ventas`),
-        where('createdAt', '>=', Timestamp.fromDate(startOfMonth)),
-        where('createdAt', '<', Timestamp.fromDate(startOfNextMonth)),
-        orderBy('createdAt', 'asc'), 
-      );
-      const salesSnap = await getDocs(qSales);
-      let totalIngresos = 0;
-      let totalGastos = 0;
-      salesSnap.forEach(doc => {
-        const data = doc.data() as Venta;
-        if (data.tipo === 'Ingreso') {
-          totalIngresos += data.monto;
-        } else if (data.tipo === 'Gasto') {
-          totalGastos += data.monto;
-        }
-      });
-      setTotalIngresosMes(totalIngresos - totalGastos);
-
-
-      // --- 3. TURNOS PROGRAMADOS (HOY)
-      const qTurnos = query(
-        collection(barberDb, `barber_users/${userUid}/turnos`),
-        where('fecha', '==', todayDateStr),
-        where('estado', '!=', 'cancelado'), // Excluir cancelados
-        orderBy('estado'), 
-        orderBy('hora')
-      );
-      const turnosSnap = await getDocs(qTurnos);
-      const turnosList = turnosSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Turno));
-      setTodayTurnos(turnosList);
-      setTotalTurnosHoy(turnosList.length);
-
-      // 🔥 DEBUG: Muestra los turnos que Firebase devolvió para hoy.
-      console.log(`[Turnos Hoy: ${todayDateStr}]`, turnosList);
-
-
-      // --- 4. ACTIVIDAD RECIENTE (ÚLTIMAS VENTAS/GASTOS)
-      const qRecent = query(
-        collection(barberDb, `barber_users/${userUid}/ventas`),
-        orderBy('createdAt', 'desc')
-      );
-      const recentSnap = await getDocs(qRecent);
-      // Casting a 'Venta'
-      const recentList = recentSnap.docs.slice(0, 8).map(doc => ({ id: doc.id, ...doc.data() } as unknown as Venta)); 
-      setRecentTransactions(recentList);
-
-    } catch (error) {
-      console.error("Error al cargar datos del Dashboard:", error);
-    }
-    setLoadingLists(false);
-  };
-
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(barberAuth, (user) => {
-      if (user) {
-        setUid(user.uid);
-        // Carga de datos que se benefician del cache-first pattern
-        const empCachedData = localStorage.getItem(`barber_stats_empleados_${user.uid}`);
-        if (empCachedData) setTotalEmpleados(Number(empCachedData));
-        const cliCachedData = localStorage.getItem(`barber_stats_clientes_${user.uid}`);
-        if (cliCachedData) setTotalClientes(Number(cliCachedData));
-        
-        fetchDashboardData(user.uid);
-      } else {
-        setUid(null);
-      }
-    });
-
-    return () => unsubscribe();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uid, todayDateStr]); 
-
-
-  /* =========================================================
-    LÓGICA DEL POPUP DE VENTA (Copiada de Ventas.tsx)
-  ========================================================= */
-
-  const resetForm = useCallback(() => {
-    setCurrentId(null);
-    setFormMonto("");
-    setFormDescripcion("");
-    setFormTipo('Ingreso');
-    setFormDate(formatDateToInput(new Date())); 
+    const ownerUid = localStorage.getItem('barberOwnerId');
+    const isEmployeeMode = userUid && ownerUid && userUid !== ownerUid;
     
-    // Configuración de servicio por defecto (si hay servicios)
-    setVentaType('servicio');
-    const defaultServiceId = servicios[0]?.id || '';
-    setSelectedServiceId(defaultServiceId);
-
-    // Actualizar campos iniciales del formulario si hay servicio por defecto
-    const defaultService = servicios.find(s => s.id === defaultServiceId);
-    if (defaultService) {
-        setFormDescripcion(`Venta de Servicio: ${defaultService.nombre}`);
-        setFormMonto(defaultService.precio.toString());
-    } else {
-        setVentaType('manual'); // Si no hay servicios, forzar manual
-    }
+    // Summary Card States
+    const [totalEmpleados, setTotalEmpleados] = useState<number | null>(null);
+    const [totalClientes, setTotalClientes] = useState<number | null>(null);
     
-    // Mantener formBarberId preseleccionado o resetear al primero
-    if (empleadosList.length > 0) {
-        setFormBarberId(empleadosList[0].id);
-    } else {
-        setFormBarberId('');
-    }
+    // Estados de Dinero: Dueño (Total Local) vs Empleado (Su Liquidación)
+    const [netoMesDueño, setNetoMesDueño] = useState<number | null>(null);
+    const [netoMesEmpleado, setNetoMesEmpleado] = useState<number | null>(null);
+
+    const [totalTurnosHoy, setTotalTurnosHoy] = useState<number | null>(null);
+    const [lowStockCount, setLowStockCount] = useState<number | null>(null); 
+
+    // List States
+    const [empleadosList, setEmpleadosList] = useState<Empleado[]>([]); 
+    const [clientesList, setClientesList] = useState<Cliente[]>([]); 
+    const [todayTurnos, setTodayTurnos] = useState<Turno[]>([]);
+    const [recentTransactions, setRecentTransactions] = useState<Venta[]>([]);
+    const [loadingLists, setLoadingLists] = useState(true);
+
+    // Filtro
+    const [selectedBarberId, setSelectedBarberId] = useState<string>('all');
     
-  }, [servicios, empleadosList]);
+    const todayDateStr = formatDateToInput(new Date());
 
-  const openModal = () => {
-    resetForm();
-    setModalOpen(true);
-  };
-
-  const closeModal = useCallback(() => {
-    setModalOpen(false);
-  }, []);
-
-  // Manejo de clicks fuera del modal
-  const handleClickOutsideModal = useCallback((event: MouseEvent) => {
-    if (modalOpen && modalRef.current && !modalRef.current.contains(event.target as Node)) {
-      closeModal();
-    }
-  }, [modalOpen, closeModal]);
-
-  useEffect(() => {
-    if (modalOpen) {
-      document.addEventListener('mousedown', handleClickOutsideModal);
-    } else {
-      document.removeEventListener('mousedown', handleClickOutsideModal);
-    }
-    return () => document.removeEventListener('mousedown', handleClickOutsideModal);
-  }, [modalOpen, handleClickOutsideModal]);
-
-  // Sincronizar formulario con selección de servicio
-  useEffect(() => {
-    if (ventaType === 'servicio' && selectedServiceId) {
-        const service = servicios.find(s => s.id === selectedServiceId);
-        if (service) {
-            setFormDescripcion(`Venta de Servicio: ${service.nombre}`);
-            setFormMonto(service.precio.toString());
-            setFormTipo('Ingreso');
-        }
-    } else if (ventaType === 'manual') {
-        // Al cambiar a manual, mantener tipo, limpiar descripción/monto si es nueva venta
-        if (!currentId) {
-            setFormDescripcion('');
-            setFormMonto('');
-        }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ventaType, selectedServiceId, servicios]);
-
-
-  const handleSave = async () => {
-    if (!uid || !formMonto || !formDescripcion.trim() || !formDate) return alert("Completa todos los campos.");
+    // Modales y confirmación
+    const [confirmOpen, setConfirmOpen] = useState(false);
+    const [isConfirmingAction, setIsConfirmingAction] = useState(false); // ⭐ Nuevo estado de bloqueo
+    const [isSaving, setIsSaving] = useState(false); // ⭐ Estado para Venta Rápida
     
-    // **VALIDACIÓN CRÍTICA: Empleado Obligatorio para Ingresos**
-    if (formTipo === 'Ingreso' && !formBarberId) {
-        return alert("Debe seleccionar un Barbero para registrar una Venta.");
-    }
+    const [confirmConfig, setConfirmConfig] = useState<{
+        title: string;
+        message: string;
+        action: () => Promise<void>; // La acción ahora debe ser asíncrona
+        confirmText: string;
+        isDanger?: boolean;
+    }>({ title: "", message: "", action: async () => {}, confirmText: "", isDanger: false });
     
-    const montoNum = Number(formMonto);
-    if (isNaN(montoNum) || montoNum <= 0) return alert("El monto debe ser un número positivo.");
+    const [, setTurnoToAction] = useState<Turno | null>(null); 
+    const confirmModalRef = useRef<HTMLDivElement>(null);
 
-    try {
-      const selectedBarber = empleadosList.find(e => e.id === formBarberId);
-      
-      const data = {
-        monto: montoNum, 
-        descripcion: formDescripcion.trim(),
-        tipo: formTipo,
-        date: formDate, 
-        servicioId: ventaType === 'servicio' && selectedServiceId ? selectedServiceId : null,
-        // Añadir datos de barbero solo si es un ingreso (venta)
-        barberId: formTipo === 'Ingreso' ? formBarberId : null,
-        barberName: formTipo === 'Ingreso' && selectedBarber ? selectedBarber.nombre : null,
-        updatedAt: serverTimestamp(),
-      };
+    // ESTADOS DEL MODAL DE VENTA RÁPIDA (Replicados de Ventas.tsx)
+    const [modalOpen, setModalOpen] = useState(false);
+    const modalRef = useRef<HTMLDivElement>(null);
+    const [servicios, setServicios] = useState<Servicio[]>([]);
+    const [currentId, setCurrentId] = useState<string | null>(null);
+    const [formMonto, setFormMonto] = useState<string>("");
+    const [formDescripcion, setFormDescripcion] = useState("");
+    const [formTipo, setFormTipo] = useState<'Ingreso' | 'Gasto'>('Ingreso');
+    const [formDate, setFormDate] = useState<string>(formatDateToInput(new Date()));
+    const [ventaType, setVentaType] = useState<'servicio' | 'manual'>('servicio'); 
+    const [selectedServiceId, setSelectedServiceId] = useState<string>(''); 
+    const [formBarberId, setFormBarberId] = useState('');
 
-      // Aquí solo añadimos, ya que en el Dashboard solo se hace Venta Rápida (no edición)
-      await addDoc(collection(barberDb, `barber_users/${uid}/ventas`), {
-          ...data,
-          createdAt: serverTimestamp(),
-      });
+    // Estados para Cliente en Modal
+    const [selectedClienteId, setSelectedClienteId] = useState<string>('');
+    const [isCreatingClient, setIsCreatingClient] = useState(false);
+    const [newClientName, setNewClientName] = useState("");
+    const [newClientPhone, setNewClientPhone] = useState("");
 
-      closeModal();
-      fetchDashboardData(uid!); // Recargar datos del dashboard
-    } catch (e) {
-      console.error(e);
-      alert("Error al registrar la transacción.");
-    }
-  };
+    /* =========================================================
+        FETCH DATA LOGIC
+    ========================================================= */
 
-
-  /* =========================================================
-    OTROS HELPERS DEL DASHBOARD
-  ========================================================= */
-
-  const handleClickOutsideConfirm = useCallback((event: MouseEvent) => { // Renombrado para evitar conflicto con handleClickOutsideModal
-    const modalElement = confirmModalRef.current; // Usar confirmModalRef
-    if (confirmOpen && modalElement && !modalElement.contains(event.target as Node)) {
-      setConfirmOpen(false);
-      // setTurnoToAction(null); // Ya no es necesario
-    }
-  }, [confirmOpen]);
-
-  useEffect(() => {
-    if (confirmOpen) {
-      document.addEventListener('mousedown', handleClickOutsideConfirm);
-    } else {
-      document.removeEventListener('mousedown', handleClickOutsideConfirm);
-    }
-    return () => document.removeEventListener('mousedown', handleClickOutsideConfirm);
-  }, [confirmOpen, handleClickOutsideConfirm]);
-  
-  const triggerConfirm = (title: string, message: string, confirmText: string, isDanger: boolean, action: () => void) => {
-    setConfirmConfig({ title, message, confirmText, isDanger, action });
-    setConfirmOpen(true);
-  };
-  
-  // ... (handleQuickFinalize, handleQuickCancel, getFilteredTurnos, timelineAppointments)
-
-  const handleQuickFinalize = (turno: Turno) => {
-    // Se mantiene setTurnoToAction para que el modal muestre la información
-    // Aunque el valor no se lee directamente del estado, el setter se usa.
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
-    setTurnoToAction(turno); 
-    
-    triggerConfirm(
-      "Confirmar Asistencia",
-      `¿Deseas finalizar el turno de ${turno.clientName} (${turno.servicio})? Esto registrará la venta y sumará puntos de fidelidad.`,
-      "Sí, finalizar",
-      false, 
-      async () => {
-        if (!uid || !turno.id) return; 
-        
+    const fetchDashboardData = async (activeBarberieUid: string, currentUid: string, currentEmail: string | null) => {
+        setLoadingLists(true);
+        const today = new Date();
+        const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+        const startOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
 
         try {
-            // 1. CREAR DOCUMENTO DE VENTA
-            const ventaRef = await addDoc(collection(barberDb, `barber_users/${uid}/ventas`), {
-                monto: Number(turno.precio), 
-                descripcion: `Venta - Turno: ${turno.servicio} de ${turno.clientName}`,
-                tipo: 'Ingreso',
-                date: todayDateStr, 
-                
-                // FIX CLAVE: Añadir barberId y Name para liquidaciones
-                barberId: turno.barberId, 
-                barberName: turno.barberName, 
-                
-                createdAt: serverTimestamp(), 
-            });
-
-            // 2. ACTUALIZAR TURNO (Estado y ventaId)
-            await updateDoc(doc(barberDb, `barber_users/${uid}/turnos/${turno.id}`), { 
-                estado: "completado",
-                ventaId: ventaRef.id, 
-            });
-
-            // 3. SUMAR PUNTO DE FIDELIDAD
-            if (turno.clientId) { 
-                const clientRef = doc(barberDb, `barber_users/${uid}/clientes/${turno.clientId}`);
-                await updateDoc(clientRef, { cortes: increment(1) });
-            }
+            // 1. CARGA DE LISTAS
+            const empSnap = await getDocs(collection(barberDb, `barber_users/${activeBarberieUid}/empleados`));
+            const empList = empSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Empleado));
+            setTotalEmpleados(empList.length);
+            setEmpleadosList(empList);
             
-            setConfirmOpen(false);
-            fetchDashboardData(uid!); 
-        } catch (e) {
-            console.error("Error al finalizar turno rápido", e);
-            alert("Error al finalizar turno.");
-        }
-      }
-    );
-  };
-
-  const handleQuickCancel = (turno: Turno) => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
-    setTurnoToAction(turno); // Se mantiene para que el modal muestre la información
-    triggerConfirm(
-      "Cancelar Turno",
-      `¿Estás seguro de cancelar el turno de ${turno.clientName} (${turno.servicio})?`,
-      "Sí, cancelar",
-      true, 
-      async () => {
-        // *** FIX CLAVE: USAMOS EL OBJETO 'turno' DEL CLOSURE EN LUGAR DE 'turnoToAction' (estado) ***
-        if (!uid || !turno.id) return; 
-        try {
-            // Eliminar el turno - USANDO 'turno.id'
-            await deleteDoc(doc(barberDb, `barber_users/${uid}/turnos/${turno.id}`));
-            
-            setConfirmOpen(false);
-            // setTurnoToAction(null); // No es necesario si no se usa
-            fetchDashboardData(uid!); 
-        } catch (e) {
-            console.error("Error al cancelar turno rápido", e); // Si hay un error de Firebase, aparecerá aquí.
-            alert("Error al cancelar turno.");
-        }
-      }
-    );
-  };
-
-  const getFilteredTurnos = useMemo(() => {
-    // Obtenemos solo los turnos PENDIENTES
-    const pendingTurnos = todayTurnos.filter(t => t.estado === 'pendiente');
-    
-    if (selectedBarberId === 'all') {
-      // Ordenamos por hora para la visualización
-      return pendingTurnos.sort((a, b) => a.hora.localeCompare(b.hora));
-    }
-    return pendingTurnos
-      .filter(t => t.barberId === selectedBarberId)
-      .sort((a, b) => a.hora.localeCompare(b.hora));
-  }, [todayTurnos, selectedBarberId]);
-  
-  const timelineAppointments = useMemo(() => {
-    // Usamos los turnos pendientes filtrados y ordenados para la lista de acción rápida
-    return getFilteredTurnos;
-  }, [getFilteredTurnos]);
-
-  // Se define la data de las 5 tarjetas con su span de columna para la cuadrícula de 6 columnas (lg:grid-cols-6)
-  const finalSummaryCards = [
-    // 1. TURNOS PENDIENTES (3/6)
-    {
-      label: "TURNOS PENDIENTES",
-      path: "/barber-manager/turnos", // Ruta añadida
-      value: totalTurnosHoy === null ? "-" : todayTurnos.filter(t => t.estado === 'pendiente').length, // Solo pendientes
-      helper: "Pendientes de confirmar hoy",
-      icon: "📅",
-      colSpan: 3, // 50%
-    },
-    // 2. NETO DEL MES (3/6)
-    {
-      label: "NETO DEL MES",
-      path: "/barber-manager/ventas", // Ruta añadida
-      value: totalIngresosMes === null ? "-" : formatCurrency(totalIngresosMes),
-      helper: `Acumulado al ${formatDateToInput(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0))}`, // Último día del mes
-      icon: "💵",
-      color: totalIngresosMes !== null ? (totalIngresosMes >= 0 ? 'text-emerald-600' : 'text-red-600') : 'text-slate-900',
-      colSpan: 3, // 50%
-    },
-    // 3. INVENTARIO (LOW STOCK) (2/6)
-    {
-        isInventory: true, // Indicador para lógica de renderizado especial
-        label: "INVENTARIO",
-        path: "/barber-manager/stock", // Ruta añadida
-        value: lowStockCount === null ? "-" : lowStockCount,
-        helper: lowStockCount === 0 ? "Todo en orden" : (lowStockCount === null ? "Cargando..." : "Productos requieren reposición"),
-        lowStock: lowStockCount,
-        colSpan: 2, // 33.3%
-    },
-    // 4. CLIENTES REGISTRADOS (2/6)
-    {
-      label: "CLIENTES REGISTRADOS",
-      path: "/barber-manager/clientes", // Ruta añadida
-      value: totalClientes === null ? "-" : totalClientes, 
-      helper: "Registrados en la cartera",
-      icon: "👥",
-      colSpan: 2, // 33.3%
-    },
-    // 5. EMPLEADOS ACTIVOS (2/6)
-    {
-      label: "EMPLEADOS ACTIVOS",
-      path: "/barber-manager/empleados", // Ruta añadida
-      value: totalEmpleados === null ? "-" : totalEmpleados,
-      helper: "Barberos en sistema",
-      icon: "💈",
-      colSpan: 2, // 33.3%
-    },
-  ];
-
-  const navigateToSection = (path: string) => {
-    navigate(path);
-  }
-
-
-  /* =========================================================
-    RENDER
-  ========================================================= */
-  const inputClass = "w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-slate-800 focus:border-transparent outline-none transition-all text-sm";
-  const btnPrimary = "w-full py-2.5 bg-slate-900 text-white rounded-lg hover:bg-slate-800 active:scale-[0.98] transition font-medium text-sm";
-  const btnSecondary = "w-full py-2.5 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 active:scale-[0.98] transition font-medium text-sm";
-
-
-  return (
-    <div className="space-y-6 animate-fadeIn m-2 pb-16">
-      
-      {/* Welcome banner and Quick Actions */}
-      <div className="w-full rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-slate-700 px-8 py-6 shadow-sm flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-semibold text-white mb-1">
-            Bienvenido/a a Exentra - Barber Manager
-          </h1>
-          <p className="text-sm text-slate-200">
-            Gestioná tu barbería de manera inteligente y eficiente.
-          </p>
-        </div>
-        <button 
-          onClick={openModal} // LLAMAR AL POPUP EN LUGAR DE NAVEGAR
-          className="flex items-center cursor-pointer gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-md active:scale-95 whitespace-nowrap"
-        >
-          <IconAdd />
-          Venta Rápida
-        </button>
-      </div>
-
-      {/* Summary cards */}
-      {/* CUADRÍCULA AJUSTADA A 6 COLUMNAS PARA ESCRITORIO */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
-        
-        {finalSummaryCards.map((card, index) => {
-            
-            // Clase de ancho de columna para desktop
-            const colSpanClass = card.colSpan ? `lg:col-span-${card.colSpan}` : 'lg:col-span-1';
-            
-            const cardClasses = `bg-white rounded-2xl shadow-sm border px-5 py-4 flex flex-col justify-between transition-all cursor-pointer hover:shadow-lg
-                                 ${colSpanClass}`;
-
-            // Lógica específica para la tarjeta de Inventario (Low Stock)
-            if (card.isInventory) {
-                return (
-                    <div 
-                        key={index}
-                        onClick={() => navigateToSection(card.path)} // Navegación
-                        className={`${cardClasses} ${card.lowStock === null ? 'border-slate-200' : (card.lowStock > 0 ? 'border-red-400 ring-1 ring-red-400/50' : 'border-emerald-400 ring-1 ring-emerald-400/50')}`}
-                    >
-                        <div className="flex items-center justify-between mb-4">
-                            <div>
-                                <p className="text-xs font-medium text-slate-500 tracking-wide">
-                                    {card.label}
-                                </p>
-                                <p className={`mt-2 text-2xl font-semibold ${card.lowStock === null || card.lowStock === 0 ? 'text-slate-900' : 'text-red-600'}`}>
-                                    {card.value}
-                                </p>
-                            </div>
-                            <div className={`w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-lg ${card.lowStock === null || card.lowStock === 0 ? 'bg-slate-100 text-slate-700' : 'bg-red-100 text-red-600'}`}>
-                                <IconAlert />
-                            </div>
-                        </div>
-                        <p className="text-xs text-slate-500">
-                            {card.helper}
-                        </p>
-                    </div>
-                );
+            // Identificar al empleado actual (para saber su %)
+            let loggedEmployee: Empleado | undefined;
+            if (currentUid && currentUid !== activeBarberieUid) {
+                 loggedEmployee = empList.find(e => e.id === currentUid);
+                 // Fallback por email si el ID auth no coincide directo
+                 if (!loggedEmployee && currentEmail) {
+                     const cleanedEmail = currentEmail.trim().toLowerCase();
+                     loggedEmployee = empList.find(e => e.internalEmail?.trim().toLowerCase() === cleanedEmail);
+                 }
             }
 
-            // Renderizado de las tarjetas dinámicas restantes
-            return (
-                <div
-                    key={card.label}
-                    onClick={() => navigateToSection(card.path)} // Navegación
-                    className={`${cardClasses} border-slate-200`}
-                >
-                    <div className="flex items-center justify-between mb-4">
-                        <div>
-                            <p className="text-xs font-medium text-slate-500 tracking-wide">
-                                {card.label}
-                            </p>
-                            <p className={`mt-2 text-2xl font-semibold ${card.color || 'text-slate-900'}`}>
-                                {card.value}
-                            </p>
-                        </div>
+            // Preseleccionar barbero en el modal
+            if (loggedEmployee) {
+                 setFormBarberId(loggedEmployee.id);
+            } else if (empList.length > 0) {
+                 setFormBarberId(empList[0].id);
+            }
 
-                        <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-700 text-lg">
-                            {card.icon}
-                        </div>
-                    </div>
+            const cliSnap = await getDocs(collection(barberDb, `barber_users/${activeBarberieUid}/clientes`));
+            const cliList = cliSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Cliente));
+            setTotalClientes(cliSnap.size);
+            setClientesList(cliList);
 
-                    <p className="text-xs text-slate-500">{card.helper}</p>
-                </div>
+            const stockSnap = await getDocs(collection(barberDb, `barber_users/${activeBarberieUid}/stock`));
+            let lowStock = 0;
+            stockSnap.forEach(doc => {
+                const data = doc.data() as Producto;
+                if (data.cantidadActual <= data.stockBajo) {
+                    lowStock++;
+                }
+            });
+            setLowStockCount(lowStock);
+            
+            const qServicios = query(collection(barberDb, `barber_users/${activeBarberieUid}/servicios`), orderBy("nombre", "asc"));
+            const snapServicios = await getDocs(qServicios);
+            const serviciosList: Servicio[] = [];
+            snapServicios.forEach((d) => serviciosList.push({ id: d.id, ...d.data() } as Servicio));
+            setServicios(serviciosList);
+
+
+            // 2. CÁLCULO DE DINERO (NETO Y LIQUIDACIÓN)
+            const salesFilters = [
+                 where('createdAt', '>=', Timestamp.fromDate(startOfMonth)),
+                 where('createdAt', '<', Timestamp.fromDate(startOfNextMonth)),
+                 orderBy('createdAt', 'asc'), 
+             ];
+            
+            const qSales = query(
+                collection(barberDb, `barber_users/${activeBarberieUid}/ventas`),
+                ...salesFilters
             );
-        })}
+            
+            const salesSnap = await getDocs(qSales);
+            
+            let ownerIngresos = 0;
+            let ownerGastos = 0;
+            
+            let employeeComisionAcumulada = 0;
+            let employeeGastosAcumulados = 0;
+
+            salesSnap.forEach(doc => {
+                const data = doc.data() as Venta;
+                
+                // --- Cálculo Global (Para el Dueño: Todo el dinero que entra/sale) ---
+                if (data.tipo === 'Ingreso') ownerIngresos += data.monto;
+                else if (data.tipo === 'Gasto') ownerGastos += data.monto;
+
+                // --- Cálculo Individual (Para el Empleado: Su % de ganancia) ---
+                if (loggedEmployee && data.barberId === loggedEmployee.id) {
+                     if (data.tipo === 'Ingreso') {
+                         // Sumamos solo SU PARTE (Venta * Porcentaje / 100). Usamos el porcentaje de su perfil (ya que la venta no tiene el campo comisionAplicada)
+                         const comision = data.monto * (loggedEmployee.porcentaje / 100);
+                         employeeComisionAcumulada += comision;
+                     } else if (data.tipo === 'Gasto') {
+                         // Restamos sus gastos propios completos
+                         employeeGastosAcumulados += data.monto;
+                     }
+                }
+            });
+
+            setNetoMesDueño(ownerIngresos - ownerGastos);
+            // El empleado ve: (Sus Comisiones) - (Sus Gastos)
+            setNetoMesEmpleado(loggedEmployee ? (employeeComisionAcumulada - employeeGastosAcumulados) : 0);
+
+
+            // 3. TURNOS PROGRAMADOS (HOY)
+            const turnosFilters = [
+                 where('fecha', '==', todayDateStr),
+                 where('estado', '!=', 'cancelado'),
+                 orderBy('estado'), 
+                 orderBy('hora')
+             ];
+
+            const qTurnos = query(
+                collection(barberDb, `barber_users/${activeBarberieUid}/turnos`),
+                ...turnosFilters
+            );
+            
+            const turnosSnap = await getDocs(qTurnos);
+            const turnosList = turnosSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Turno));
+            setTodayTurnos(turnosList);
+            
+            // Filtrar contador de turnos
+            if (loggedEmployee) {
+                 const misTurnos = turnosList.filter(t => t.barberId === loggedEmployee?.id);
+                 setTotalTurnosHoy(misTurnos.length);
+            } else {
+                 setTotalTurnosHoy(turnosList.length);
+            }
+
+
+            // 4. ACTIVIDAD RECIENTE
+            const qRecent = query(
+                collection(barberDb, `barber_users/${activeBarberieUid}/ventas`),
+                orderBy('createdAt', 'desc')
+            );
+            const recentSnap = await getDocs(qRecent);
+            let recentList = recentSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as unknown as Venta)); 
+            
+            // Si es empleado, filtrar para que solo vea sus movimientos
+            if (loggedEmployee) {
+                 recentList = recentList.filter(v => v.barberId === loggedEmployee?.id);
+            }
+            
+            setRecentTransactions(recentList.slice(0, 8));
+
+        } catch (error) {
+            console.error("Error al cargar datos del Dashboard:", error);
+        }
+        setLoadingLists(false);
+    };
+
+
+    useEffect(() => {
+        const unsubscribe = onAuthStateChanged(barberAuth, (user) => {
+             if (user) {
+                 setUserUid(user.uid);
+                 setCurrentUserEmail(user.email);
+                 
+                 const effectiveBarberieUid = localStorage.getItem('barberOwnerId') || user.uid;
+                 
+                 if (effectiveBarberieUid) {
+                     fetchDashboardData(effectiveBarberieUid, user.uid, user.email);
+                 } else {
+                     setLoadingLists(false);
+                 }
+
+             } else {
+                 setUserUid(null);
+                 setCurrentUserEmail(null);
+                 setLoadingLists(false);
+             }
+        });
+
+        return () => unsubscribe();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [userUid, todayDateStr]); 
+
+
+    /* =========================================================
+        LÓGICA DEL POPUP DE VENTA (Reset y Apertura)
+    ========================================================= */
+
+    const resetForm = useCallback(() => {
+        setCurrentId(null);
+        setFormMonto("");
+        setFormDescripcion("");
+        setFormTipo('Ingreso');
+        setFormDate(formatDateToInput(new Date())); 
         
-      </div>
+        setVentaType('servicio');
+        const defaultServiceId = servicios[0]?.id || '';
+        setSelectedServiceId(defaultServiceId);
 
-      {/* Main bottom section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        // Reset Cliente
+        setSelectedClienteId('');
+        setIsCreatingClient(false);
+        setNewClientName("");
+        setNewClientPhone("");
+
+        const defaultService = servicios.find(s => s.id === defaultServiceId);
+        if (defaultService) {
+             setFormDescripcion(`Venta de Servicio: ${defaultService.nombre}`);
+             setFormMonto(defaultService.precio.toString());
+        } else {
+             setVentaType('manual');
+        }
         
-        {/* Recent activity */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col h-[460px]">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <h3 className="text-sm font-semibold text-slate-900">
-                Actividad reciente (Ventas/Gastos)
-              </h3>
+        // Si es empleado, forzar su ID. Si es dueño, el primero.
+        if (isEmployeeMode && userUid) {
+             const me = empleadosList.find(e => e.id === userUid);
+             if (me) setFormBarberId(me.id);
+        } else if (empleadosList.length > 0) {
+             setFormBarberId(empleadosList[0].id);
+        } else {
+             setFormBarberId('');
+        }
+        
+    }, [servicios, empleadosList, isEmployeeMode, userUid]);
+
+    const openModal = () => {
+        resetForm();
+        setModalOpen(true);
+    };
+
+    const closeModal = useCallback(() => {
+        setModalOpen(false);
+    }, []);
+
+    const handleClickOutsideModal = useCallback((event: MouseEvent) => {
+        if (modalOpen && modalRef.current && !modalRef.current.contains(event.target as Node)) {
+             closeModal();
+        }
+    }, [modalOpen, closeModal]);
+
+    useEffect(() => {
+         if (modalOpen) {
+             document.addEventListener('mousedown', handleClickOutsideModal);
+         } else {
+             document.removeEventListener('mousedown', handleClickOutsideModal);
+         }
+         return () => document.removeEventListener('mousedown', handleClickOutsideModal);
+    }, [modalOpen, handleClickOutsideModal]);
+
+    // Sincronización Servicio -> Formulario
+    useEffect(() => {
+         if (ventaType === 'servicio' && selectedServiceId) {
+             const service = servicios.find(s => s.id === selectedServiceId);
+             if (service) {
+                 setFormDescripcion(`Venta de Servicio: ${service.nombre}`);
+                 setFormMonto(service.precio.toString());
+                 setFormTipo('Ingreso');
+             }
+         } else if (ventaType === 'manual') {
+             if (!currentId) {
+                 setFormDescripcion('');
+                 setFormMonto('');
+             }
+         }
+         // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [ventaType, selectedServiceId, servicios]);
+
+
+    // GUARDAR VENTA (Idéntico a Ventas.tsx con Fidelidad)
+    const handleSave = async () => {
+        const effectiveUid = localStorage.getItem('barberOwnerId') || userUid;
+        if (!effectiveUid || isSaving) return; // Bloquea si ya está guardando
+        
+        if (!formMonto || !formDescripcion.trim() || !formDate) return alert("Completa todos los campos.");
+        
+        if (formTipo === 'Ingreso' && !formBarberId) {
+             return alert("Debe seleccionar un Barbero para registrar una Venta.");
+        }
+
+        if (isCreatingClient && !newClientName.trim()) {
+             return alert("Por favor ingresa el nombre del nuevo cliente.");
+        }
+        
+        const montoNum = Number(formMonto);
+        if (isNaN(montoNum) || montoNum <= 0) return alert("El monto debe ser un número positivo.");
+        
+        setIsSaving(true); // ⭐ BLOQUEA EL BOTÓN
+        
+        try {
+             const selectedBarber = empleadosList.find(e => e.id === formBarberId);
+             
+             let clienteIdToSave: string | null = null;
+             let clienteNameToSave: string | null = null;
+
+             // 1. GESTIÓN DEL CLIENTE
+             if (formTipo === 'Ingreso') {
+                 if (isCreatingClient) {
+                      const newClientData = {
+                          nombre: newClientName.trim(),
+                          telefono: newClientPhone.trim(),
+                          visitas: 0,
+                          ultimaVisita: serverTimestamp(),
+                          createdAt: serverTimestamp(),
+                      };
+                      const docRef = await addDoc(collection(barberDb, `barber_users/${effectiveUid}/clientes`), newClientData);
+                      clienteIdToSave = docRef.id;
+                      clienteNameToSave = newClientName.trim();
+                 } else if (selectedClienteId) {
+                      const selectedCliente = clientesList.find(c => c.id === selectedClienteId);
+                      if (selectedCliente) {
+                          clienteIdToSave = selectedCliente.id;
+                          clienteNameToSave = selectedCliente.nombre;
+                      }
+                 }
+             }
+
+             // 2. CREAR LA VENTA
+             const data = {
+                 monto: montoNum, 
+                 descripcion: formDescripcion.trim(),
+                 tipo: formTipo,
+                 date: formDate, 
+                 servicioId: ventaType === 'servicio' && selectedServiceId ? selectedServiceId : null,
+                 barberId: formTipo === 'Ingreso' ? formBarberId : null,
+                 barberName: formTipo === 'Ingreso' && selectedBarber ? selectedBarber.nombre : null,
+                 // Fijación de comisión (importante para liquidación)
+                 comisionAplicada: formTipo === 'Ingreso' && selectedBarber ? selectedBarber.porcentaje : null,
+                 // Guardar datos del cliente
+                 clienteId: clienteIdToSave,
+                 clienteNombre: clienteNameToSave,
+                 updatedAt: serverTimestamp(),
+             };
+
+             await addDoc(collection(barberDb, `barber_users/${effectiveUid}/ventas`), {
+                  ...data,
+                  createdAt: serverTimestamp(),
+             });
+
+             // 3. SUMAR FIDELIDAD (+1 Visita)
+             if (clienteIdToSave) {
+                 const clientRef = doc(barberDb, `barber_users/${effectiveUid}/clientes/${clienteIdToSave}`);
+                 await updateDoc(clientRef, { 
+                      visitas: increment(1),
+                      ultimaVisita: serverTimestamp() 
+                 });
+             }
+
+             closeModal();
+             // Refrescar el Dashboard después de guardar
+             fetchDashboardData(effectiveUid!, userUid!, currentUserEmail); 
+        } catch (e) {
+             console.error(e);
+             alert("Error al registrar la transacción.");
+        } finally {
+             setIsSaving(false); // ⭐ DESBLOQUEA EL BOTÓN
+        }
+    };
+
+
+    /* =========================================================
+        OTROS HELPERS (Confirmaciones y Acciones Rápidas)
+    ========================================================= */
+
+    const executeConfirmAction = async () => {
+        if (isConfirmingAction) return;
+
+        setIsConfirmingAction(true); // ⭐ BLOQUEA EL BOTÓN DE CONFIRMACIÓN
+        
+        try {
+            await confirmConfig.action(); // Ejecuta la acción (Finalizar o Cancelar)
+            setConfirmOpen(false);
+        } catch (e) {
+            console.error("Error al ejecutar acción confirmada:", e);
+            alert("Ocurrió un error al procesar la acción.");
+        } finally {
+            setIsConfirmingAction(false); // ⭐ DESBLOQUEA EL BOTÓN DE CONFIRMACIÓN
+        }
+    };
+
+    const handleClickOutsideConfirm = useCallback((event: MouseEvent) => { 
+         const modalElement = confirmModalRef.current; 
+         if (confirmOpen && modalElement && !modalElement.contains(event.target as Node)) {
+             setConfirmOpen(false);
+         }
+    }, [confirmOpen]);
+
+    useEffect(() => {
+         if (confirmOpen) {
+             document.addEventListener('mousedown', handleClickOutsideConfirm);
+         } else {
+             document.removeEventListener('mousedown', handleClickOutsideConfirm);
+         }
+         return () => document.removeEventListener('mousedown', handleClickOutsideConfirm);
+    }, [confirmOpen, handleClickOutsideConfirm]);
+    
+    const triggerConfirm = (title: string, message: string, confirmText: string, isDanger: boolean, action: () => Promise<void>) => {
+         setConfirmConfig({ title, message, confirmText, isDanger, action });
+         setConfirmOpen(true);
+    };
+    
+    const handleQuickFinalize = (turno: Turno) => {
+         setTurnoToAction(turno); 
+         
+         const action = async () => {
+             const effectiveUid = localStorage.getItem('barberOwnerId') || userUid;
+             if (!effectiveUid || !turno.id) return; 
+             
+             // Lógica de finalización (similar a handleSave pero con datos del turno)
+             const selectedEmployee = empleadosList.find(e => e.id === turno.barberId);
+             
+             const ventaRef = await addDoc(collection(barberDb, `barber_users/${effectiveUid}/ventas`), {
+                 monto: Number(turno.precio), 
+                 descripcion: `Venta - Turno: ${turno.servicio} de ${turno.clientName}`,
+                 tipo: 'Ingreso',
+                 date: todayDateStr, 
+                 barberId: turno.barberId, 
+                 barberName: turno.barberName, 
+                 // Fijación de comisión usando el perfil actual del barbero
+                 comisionAplicada: selectedEmployee ? selectedEmployee.porcentaje : 0, 
+                 clienteId: turno.clientId || null,
+                 clienteNombre: turno.clientName || null,
+                 createdAt: serverTimestamp(), 
+             });
+
+             await updateDoc(doc(barberDb, `barber_users/${effectiveUid}/turnos/${turno.id}`), { 
+                 estado: "completado",
+                 ventaId: ventaRef.id, 
+             });
+
+             if (turno.clientId) { 
+                 const clientRef = doc(barberDb, `barber_users/${effectiveUid}/clientes/${turno.clientId}`);
+                 await updateDoc(clientRef, { 
+                      visitas: increment(1),
+                      ultimaVisita: serverTimestamp() 
+                 });
+             }
+             
+             fetchDashboardData(effectiveUid!, userUid!, currentUserEmail); 
+         };
+
+         triggerConfirm(
+             "Confirmar Asistencia",
+             `¿Deseas finalizar el turno de ${turno.clientName} (${turno.servicio})? Esto registrará la venta y sumará puntos de fidelidad.`,
+             "Sí, finalizar",
+             false, 
+             action
+         );
+    };
+
+    const handleQuickCancel = (turno: Turno) => {
+         setTurnoToAction(turno); 
+         
+         const action = async () => {
+             const effectiveUid = localStorage.getItem('barberOwnerId') || userUid;
+             if (!effectiveUid || !turno.id) return; 
+             
+             await updateDoc(doc(barberDb, `barber_users/${effectiveUid}/turnos/${turno.id}`), { 
+                 estado: "cancelado",
+             });
+             
+             fetchDashboardData(effectiveUid!, userUid!, currentUserEmail); 
+         };
+
+         triggerConfirm(
+             "Cancelar Turno",
+             `¿Estás seguro de cancelar el turno de ${turno.clientName} (${turno.servicio})?`,
+             "Sí, cancelar",
+             true, 
+             action
+         );
+    };
+
+    const getFilteredTurnos = useMemo(() => {
+         const pendingTurnos = todayTurnos.filter(t => t.estado === 'pendiente');
+         
+         if (isEmployeeMode) {
+             return pendingTurnos.filter(t => t.barberId === userUid).sort((a, b) => (a.hora || '').localeCompare(b.hora || ''));
+         }
+
+         if (selectedBarberId === 'all') {
+             return pendingTurnos.sort((a, b) => (a.hora || '').localeCompare(b.hora || ''));
+         }
+         return pendingTurnos
+             .filter(t => t.barberId === selectedBarberId)
+             .sort((a, b) => (a.hora || '').localeCompare(b.hora || ''));
+    }, [todayTurnos, selectedBarberId, isEmployeeMode, userUid]);
+    
+    const timelineAppointments = useMemo(() => {
+         return getFilteredTurnos;
+    }, [getFilteredTurnos]);
+
+    // --- CONFIGURACIÓN DE TARJETAS (Visible Property) ---
+    const displayNeto = isEmployeeMode ? netoMesEmpleado : netoMesDueño;
+    const labelNeto = isEmployeeMode ? "MI LIQUIDACIÓN (MES)" : "NETO DEL MES";
+    const helperNeto = isEmployeeMode ? "Comisiones estimadas - Gastos" : `Acumulado al ${formatDateToInput(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0))}`;
+
+    const allCards = [
+         {
+             label: "TURNOS PENDIENTES",
+             path: "/barber-manager/turnos", 
+             value: totalTurnosHoy === null ? "-" : todayTurnos.filter(t => t.estado === 'pendiente').length, 
+             helper: "Pendientes de confirmar hoy",
+             icon: "📅",
+             colSpan: 3, 
+             visible: true 
+         },
+         {
+             label: labelNeto,
+             path: "/barber-manager/ventas", 
+             value: displayNeto === null ? "-" : formatCurrency(displayNeto),
+             helper: helperNeto,
+             icon: "💵",
+             color: displayNeto !== null ? (displayNeto >= 0 ? 'text-emerald-600' : 'text-red-600') : 'text-slate-900',
+             colSpan: 3, 
+             visible: true 
+         },
+         {
+             isInventory: true, 
+             label: "INVENTARIO",
+             path: "/barber-manager/stock", 
+             value: lowStockCount === null ? "-" : lowStockCount,
+             helper: lowStockCount === 0 ? "Todo en orden" : (lowStockCount === null ? "Cargando..." : "Productos requieren reposición"),
+             lowStock: lowStockCount,
+             colSpan: 2, 
+             visible: true 
+         },
+         {
+             label: "CLIENTES REGISTRADOS",
+             path: "/barber-manager/clientes", 
+             value: totalClientes === null ? "-" : totalClientes, 
+             helper: "Registrados en la cartera",
+             icon: "👥",
+             colSpan: 2, 
+             visible: true 
+         },
+         {
+             label: "EMPLEADOS ACTIVOS",
+             path: "/barber-manager/empleados", 
+             value: totalEmpleados === null ? "-" : totalEmpleados,
+             helper: "Barberos en sistema",
+             icon: "💈",
+             colSpan: 2, 
+             visible: !isEmployeeMode // CRÍTICO: SOLO VISIBLE SI NO ES EMPLEADO
+         },
+     ];
+
+    const finalSummaryCards = allCards.filter(c => c.visible);
+
+
+    /* =========================================================
+        RENDER
+    ========================================================= */
+    const navigateToSection = (path: string) => {
+         navigate(path);
+    }
+    const inputClass = "w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-slate-800 focus:border-transparent outline-none transition-all text-sm";
+    const btnPrimary = "w-full py-2.5 bg-slate-900 text-white rounded-lg hover:bg-slate-800 active:scale-[0.98] transition font-medium text-sm";
+    const btnSecondary = "w-full py-2.5 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 active:scale-[0.98] transition font-medium text-sm";
+
+
+    return (
+        <div className="space-y-6 animate-fadeIn m-2 pb-16">
+            
+            {/* Welcome banner */}
+            <div className="w-full rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-slate-700 px-8 py-6 shadow-sm flex justify-between items-center">
+                 <div>
+                     <h1 className="text-2xl font-semibold text-white mb-1">
+                         Bienvenido/a {userUid ? (isEmployeeMode ? 'Barbero' : 'Dueño') : 'Usuario'} - Hair Salon Manager
+                     </h1>
+                     <p className="text-sm text-slate-200">
+                         Gestioná tu barbería/peluquería de manera inteligente y eficiente.
+                     </p>
+                 </div>
+                 <button 
+                     onClick={openModal} 
+                     className="flex items-center cursor-pointer gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-md active:scale-95 whitespace-nowrap"
+                 >
+                     <IconAdd />
+                     Venta Rápida
+                 </button>
             </div>
 
-            <button onClick={() => navigate("/barber-manager/ventas")} className="text-xs font-medium cursor-pointer text-emerald-600 hover:text-emerald-700">
-              Ver todas
-            </button>
-          </div>
+            {/* Summary cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+                 {finalSummaryCards.map((card, index) => {
+                     const colSpanClass = card.colSpan ? `lg:col-span-${card.colSpan}` : 'lg:col-span-1';
+                     const cardClasses = `bg-white rounded-2xl shadow-sm border px-5 py-4 flex flex-col justify-between transition-all cursor-pointer hover:shadow-lg ${colSpanClass}`;
 
-          <div className="flex-1 overflow-y-auto custom-scrollbar">
-            {loadingLists ? (
-                <div className="text-center py-12 text-sm text-slate-500">Cargando actividad...</div>
-            ) : recentTransactions.length === 0 ? (
-                <div className="text-center py-12 text-sm text-slate-400">No hay transacciones recientes.</div>
-            ) : (
-                <div className="px-5 py-3 space-y-2">
-                    {recentTransactions.map((item, index) => {
-                        const isIngreso = item.tipo === 'Ingreso';
-                        const color = isIngreso ? 'text-emerald-600' : 'text-red-600';
-                        const sign = isIngreso ? '+' : '-';
-                        
-                        return (
-                            <div
-                                // Se usa index como fallback si createdAt no es único o no tiene seconds
-                                key={item.id || index} 
-                                className="flex items-center justify-between rounded-xl px-3 py-2 hover:bg-slate-50 transition"
-                            >
-                                <div className="flex items-center gap-3">
-                                <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-medium ${isIngreso ? 'bg-emerald-100/50 text-emerald-700' : 'bg-red-100/50 text-red-700'}`}>
-                                    {isIngreso ? "I" : "G"}
-                                </div>
-                                <div>
-                                    <p className="text-sm font-medium text-slate-900">
-                                    {item.descripcion}
-                                    </p>
-                                    <p className="text-xs text-slate-500">{item.tipo}</p>
-                                    <p className="text-[11px] text-slate-400">
-                                    {item.createdAt.toDate().toLocaleTimeString("es-AR", { hour: '2-digit', minute: '2-digit' })}
-                                    </p>
-                                </div>
-                                </div>
+                     if (card.isInventory) {
+                          return (
+                              <div 
+                                  key={index}
+                                  onClick={() => navigateToSection(card.path)} 
+                                  className={`${cardClasses} ${card.lowStock === null ? 'border-slate-200' : (card.lowStock > 0 ? 'border-red-400 ring-1 ring-red-400/50' : 'border-emerald-400 ring-1 ring-emerald-400/50')}`}
+                              >
+                                  <div className="flex items-center justify-between mb-4">
+                                      <div>
+                                          <p className="text-xs font-medium text-slate-500 tracking-wide">
+                                              {card.label}
+                                          </p>
+                                          <p className={`mt-2 text-2xl font-semibold ${card.lowStock === null || card.lowStock === 0 ? 'text-slate-900' : 'text-red-600'}`}>
+                                              {card.value}
+                                          </p>
+                                      </div>
+                                      <div className={`w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-lg ${card.lowStock === null || card.lowStock === 0 ? 'bg-slate-100 text-slate-700' : 'bg-red-100 text-red-600'}`}>
+                                          <IconAlert />
+                                      </div>
+                                  </div>
+                                  <p className="text-xs text-slate-500">
+                                      {card.helper}
+                                  </p>
+                              </div>
+                          );
+                     }
 
-                                <div className="text-right">
-                                <p className={`text-sm font-semibold ${color}`}>
-                                    {sign} {formatCurrency(item.monto)}
-                                </p>
-                                <p className="text-[11px] text-slate-400">Registrado</p>
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
+                     return (
+                         <div
+                             key={card.label}
+                             onClick={() => navigateToSection(card.path)} 
+                             className={`${cardClasses} border-slate-200`}
+                         >
+                             <div className="flex items-center justify-between mb-4">
+                                 <div>
+                                     <p className="text-xs font-medium text-slate-500 tracking-wide">
+                                         {card.label}
+                                     </p>
+                                     <p className={`mt-2 text-2xl font-semibold ${card.color || 'text-slate-900'}`}>
+                                         {card.value}
+                                     </p>
+                                 </div>
+
+                                 <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-700 text-lg">
+                                     {card.icon}
+                                 </div>
+                             </div>
+
+                             <p className="text-xs text-slate-500">{card.helper}</p>
+                         </div>
+                     );
+                 })}
+            </div>
+
+            {/* Main bottom section */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                 
+                 {/* Recent activity */}
+                 <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col h-[460px]">
+                     <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+                         <div className="flex items-center gap-2">
+                             <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                             <h3 className="text-sm font-semibold text-slate-900">
+                                 {isEmployeeMode ? 'Mi Actividad Reciente' : 'Actividad reciente (Ventas/Gastos)'}
+                             </h3>
+                         </div>
+
+                         <button onClick={() => navigate("/barber-manager/ventas")} className="text-xs font-medium cursor-pointer text-emerald-600 hover:text-emerald-700">
+                             Ver todas
+                         </button>
+                     </div>
+
+                     <div className="flex-1 overflow-y-auto custom-scrollbar">
+                         {loadingLists ? (
+                              <div className="text-center py-12 text-sm text-slate-500">Cargando actividad...</div>
+                         ) : recentTransactions.length === 0 ? (
+                              <div className="text-center py-12 text-sm text-slate-400">No hay transacciones recientes.</div>
+                         ) : (
+                              <div className="px-5 py-3 space-y-2">
+                                  {recentTransactions.map((item, index) => {
+                                       const isIngreso = item.tipo === 'Ingreso';
+                                       const color = isIngreso ? 'text-emerald-600' : 'text-red-600';
+                                       const sign = isIngreso ? '+' : '-';
+                                       
+                                       return (
+                                           <div
+                                               key={item.id || index} 
+                                               className="flex items-center justify-between rounded-xl px-3 py-2 hover:bg-slate-50 transition"
+                                           >
+                                               <div className="flex items-center gap-3">
+                                               <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-medium ${isIngreso ? 'bg-emerald-100/50 text-emerald-700' : 'bg-red-100/50 text-red-700'}`}>
+                                                   {isIngreso ? "I" : "G"}
+                                               </div>
+                                               <div>
+                                                   <p className="text-sm font-medium text-slate-900">
+                                                   {item.descripcion}
+                                                   </p>
+                                                   <p className="text-xs text-slate-500">{item.tipo}</p>
+                                                   <p className="text-[11px] text-slate-400">
+                                                   {item.createdAt.toDate().toLocaleTimeString("es-AR", { hour: '2-digit', minute: '2-digit' })}
+                                                   </p>
+                                               </div>
+                                               </div>
+
+                                               <div className="text-right">
+                                               <p className={`text-sm font-semibold ${color}`}>
+                                                   {sign} {formatCurrency(item.monto)}
+                                               </p>
+                                               <p className="text-[11px] text-slate-400">Registrado</p>
+                                               </div>
+                                           </div>
+                                       );
+                                   })}
+                              </div>
+                         )}
+                     </div>
+                 </div>
+
+                 {/* Upcoming appointments */}
+                 <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col h-[460px]">
+                     <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+                         <h3 className="text-sm font-semibold text-slate-900">
+                             Acciones Rápidas - Turnos Pendientes
+                         </h3>
+                         
+                         {!isEmployeeMode && (
+                             <div className="flex items-center gap-2 text-xs">
+                             <span className="text-slate-500 hidden sm:inline">Filtrar:</span>
+                             <select
+                                 value={selectedBarberId}
+                                 onChange={(e) => setSelectedBarberId(e.target.value)}
+                                 className="px-2 py-1 rounded-md border cursor-pointer border-slate-200 text-slate-700 text-xs focus:ring-slate-800"
+                             >
+                                 <option value="all">General</option>
+                                 {empleadosList.map(emp => (
+                                     <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                                 ))}
+                             </select>
+                             </div>
+                         )}
+                     </div>
+
+                     <div className="flex-1 overflow-y-auto custom-scrollbar px-5 py-3 space-y-3">
+                         {loadingLists ? (
+                              <div className="text-center py-12 text-sm text-slate-500">Cargando turnos...</div>
+                         ) : timelineAppointments.length === 0 ? (
+                              <div className="text-center py-12 text-sm text-slate-400">No hay turnos pendientes para {selectedBarberId === 'all' && !isEmployeeMode ? 'hoy' : 'este barbero'}.</div>
+                         ) : (
+                              <>
+                                  {timelineAppointments.map((turno) => (
+                                      <div key={turno.id} className="border border-slate-100 rounded-xl px-3 py-2 hover:border-slate-200 hover:bg-slate-50 transition flex justify-between items-center">
+                                          <div>
+                                              <p className="text-[11px] font-medium text-slate-600">
+                                                  {turno.hora}
+                                              </p>
+                                              <p className="text-sm font-semibold text-slate-900">
+                                                  {turno.clientName}
+                                              </p>
+                                              <p className="text-xs text-slate-500">
+                                                  {turno.servicio} · {turno.barberName}
+                                              </p>
+                                          </div>
+                                          <div className="flex gap-2">
+                                              <button 
+                                                  onClick={() => handleQuickFinalize(turno)}
+                                                  className="p-2 cursor-pointer bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition active:scale-95"
+                                                  title="Finalizar Turno"
+                                              >
+                                                  <IconCheck />
+                                              </button>
+                                              <button 
+                                                  onClick={() => handleQuickCancel(turno)}
+                                                  className="p-2 cursor-pointer bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition active:scale-95"
+                                                  title="Cancelar Turno"
+                                              >
+                                                  <IconTrash />
+                                              </button>
+                                          </div>
+                                      </div>
+                                  ))}
+                              </>
+                         )}
+                     </div>
+                 </div>
+            </div>
+
+            {/* MODAL DE VENTA RÁPIDA (POTENCIADO, IGUAL A VENTAS.TSX) */}
+            {modalOpen && (
+                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+                     <div 
+                         ref={modalRef}
+                         className="bg-white rounded-2xl w-full max-w-md p-6 shadow-xl animate-fadeIn max-h-[90vh] overflow-y-auto"
+                         onClick={(e) => e.stopPropagation()} 
+                     >
+                         <h3 className="text-lg font-semibold text-slate-900 mb-4">
+                             Nueva Venta Rápida
+                         </h3>
+                         
+                         <div className="space-y-4">
+                             
+                             {/* Tipo de Transacción */}
+                             <div>
+                                 <label className="text-xs font-medium text-slate-600 mb-1 block">Tipo de Monto</label>
+                                 <div className="flex space-x-4">
+                                     <button 
+                                         onClick={() => {
+                                             setFormTipo('Ingreso');
+                                             if (!isEmployeeMode && empleadosList.length > 0) setFormBarberId(empleadosList[0].id);
+                                             setVentaType(servicios.length > 0 ? 'servicio' : 'manual');
+                                         }}
+                                         disabled={isSaving}
+                                         className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 cursor-pointer ${
+                                             formTipo === 'Ingreso' 
+                                                 ? 'bg-emerald-50 border-emerald-500 text-emerald-800' 
+                                                 : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                                         }`}
+                                     >
+                                         Ingreso (+)
+                                     </button>
+                                     <button 
+                                         onClick={() => {
+                                             setFormTipo('Gasto');
+                                             if (!isEmployeeMode) setFormBarberId(''); 
+                                             setSelectedClienteId(''); 
+                                             setIsCreatingClient(false);
+                                         }}
+                                         disabled={isSaving}
+                                         className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 cursor-pointer ${
+                                             formTipo === 'Gasto' 
+                                                 ? 'bg-red-50 border-red-500 text-red-800' 
+                                                 : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                                         }`}
+                                     >
+                                         Gasto (-)
+                                     </button>
+                                 </div>
+                             </div>
+                             
+                             {/* Selector de Empleado */}
+                             {formTipo === 'Ingreso' && empleadosList.length > 0 && (
+                                     <div className="border-t border-slate-100 pt-4">
+                                         <label className="text-xs font-medium text-slate-600 mb-1 block">Barbero Asignado (Obligatorio)</label>
+                                         <select
+                                             value={formBarberId}
+                                             onChange={(e) => setFormBarberId(e.target.value)}
+                                             className={inputClass + ' cursor-pointer ' + (isEmployeeMode ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : '')} 
+                                             disabled={isSaving || !!isEmployeeMode}
+                                         >
+                                             <option value="">-- Selecciona un Barbero --</option>
+                                             {empleadosList.map((e) => (
+                                                 <option key={e.id} value={e.id}>
+                                                     {e.nombre} {e.id === userUid && '(Yo)'}
+                                                 </option>
+                                             ))}
+                                         </select>
+                                         {!formBarberId && <p className="text-xs text-red-500 mt-1">
+                                             Debe asignar esta venta a un empleado para el cálculo de comisiones.
+                                         </p>}
+                                     </div>
+                                 )}
+
+                             {/* --- SECCIÓN CLIENTE (CON OPCIÓN CREAR RÁPIDO) --- */}
+                             {formTipo === 'Ingreso' && (
+                                     <div className="border-t border-slate-100 pt-4">
+                                         <div className="flex justify-between items-center mb-1">
+                                             <label className="text-xs font-medium text-slate-600">
+                                                 Asignar Cliente (Opcional)
+                                             </label>
+                                             <button 
+                                                 type="button"
+                                                 onClick={() => setIsCreatingClient(!isCreatingClient)}
+                                                 className="text-[10px] font-bold text-blue-600 hover:underline cursor-pointer"
+                                                 disabled={isSaving}
+                                             >
+                                                 {isCreatingClient ? "← Seleccionar Existente" : "+ Nuevo Cliente"}
+                                             </button>
+                                         </div>
+                                         
+                                         {isCreatingClient ? (
+                                             // MODO CREAR CLIENTE
+                                             <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 space-y-2 animate-fadeIn">
+                                                 <p className="text-xs font-bold text-blue-700 mb-1">Nuevo Cliente Rápido</p>
+                                                 <input
+                                                     type="text"
+                                                     placeholder="Nombre del Cliente"
+                                                     value={newClientName}
+                                                     onChange={(e) => setNewClientName(e.target.value)}
+                                                     className="w-full px-3 py-1.5 bg-white border border-blue-200 rounded text-sm focus:outline-none focus:border-blue-400"
+                                                     autoFocus
+                                                     disabled={isSaving}
+                                                 />
+                                                 <input
+                                                     type="tel"
+                                                     placeholder="Teléfono (Opcional)"
+                                                     value={newClientPhone}
+                                                     onChange={(e) => setNewClientPhone(e.target.value)}
+                                                     className="w-full px-3 py-1.5 bg-white border border-blue-200 rounded text-sm focus:outline-none focus:border-blue-400"
+                                                     disabled={isSaving}
+                                                 />
+                                                 <p className="text-[10px] text-blue-600 mt-1">
+                                                     * Se creará y se sumará su primera visita.
+                                                 </p>
+                                             </div>
+                                         ) : (
+                                             // MODO SELECCIONAR CLIENTE
+                                             <>
+                                                 {clientesList.length > 0 ? (
+                                                     <select
+                                                         value={selectedClienteId}
+                                                         onChange={(e) => setSelectedClienteId(e.target.value)}
+                                                         className={inputClass + ' cursor-pointer border-blue-200 bg-blue-50/30'}
+                                                         disabled={isSaving}
+                                                     >
+                                                         <option value="">-- Cliente Anónimo / Sin Cuenta --</option>
+                                                         {clientesList.map((c) => (
+                                                             <option key={c.id} value={c.id}>
+                                                                 {c.nombre} {c.visitas ? `(${c.visitas} visitas)` : ''}
+                                                             </option>
+                                                         ))}
+                                                     </select>
+                                                 ) : (
+                                                     <p className="text-xs text-slate-400 italic mb-2">No tienes clientes registrados aún.</p>
+                                                 )}
+                                             </>
+                                         )}
+
+                                         {(selectedClienteId || isCreatingClient) && (
+                                             <p className="text-[10px] text-emerald-600 mt-1 font-semibold flex items-center gap-1">
+                                                 <span>⭐</span> Se sumará 1 turno al historial del cliente.
+                                             </p>
+                                         )}
+                                     </div>
+                                 )}
+
+                             {/* Selector de Venta (Servicio vs Manual) */}
+                             {formTipo === 'Ingreso' && (
+                                 <div className="border-t border-slate-100 pt-4">
+                                     <label className="text-xs font-medium text-slate-600 mb-1 block">Origen del Ingreso</label>
+                                     <div className="flex space-x-4 mb-3">
+                                         <button 
+                                             onClick={() => { setVentaType('servicio'); setSelectedServiceId(servicios[0]?.id || ''); }}
+                                             className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors border-2 cursor-pointer ${
+                                                 ventaType === 'servicio' 
+                                                     ? 'bg-slate-800 border-slate-900 text-white' 
+                                                     : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                                             }`}
+                                             disabled={servicios.length === 0 || isSaving}
+                                         >
+                                             Venta de Servicio
+                                         </button>
+                                         <button 
+                                             onClick={() => { setVentaType('manual'); setSelectedServiceId(''); }}
+                                             className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors border-2 cursor-pointer ${
+                                                 ventaType === 'manual' 
+                                                     ? 'bg-slate-800 border-slate-900 text-white' 
+                                                     : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                                             }`}
+                                             disabled={isSaving}
+                                         >
+                                             Venta/Ingreso Manual
+                                         </button>
+                                     </div>
+
+                                     {ventaType === 'servicio' && servicios.length > 0 && (
+                                         <div>
+                                             <select
+                                                 value={selectedServiceId}
+                                                 onChange={(e) => setSelectedServiceId(e.target.value)}
+                                                 className={inputClass + ' cursor-pointer'}
+                                                 disabled={isSaving}
+                                             >
+                                                 <option value="">-- Selecciona un Servicio --</option>
+                                                 {servicios.map((s) => (
+                                                     <option key={s.id} value={s.id}>
+                                                         {s.nombre} - {formatCurrency(s.precio)}
+                                                     </option>
+                                                 ))}
+                                             </select>
+                                         </div>
+                                     )}
+                                     {ventaType === 'servicio' && servicios.length === 0 && (
+                                         <p className="text-xs text-red-500 mt-1">No hay servicios registrados. Usa el modo manual.</p>
+                                     )}
+                                 </div>
+                             )}
+                             
+                             {/* Fecha de Registro */}
+                             <div className="border-t border-slate-100 pt-4">
+                                 <label className="text-xs font-medium text-slate-600 mb-1 block">Fecha de Transacción</label>
+                                 <input 
+                                     type="date" 
+                                     value={formDate} 
+                                     onChange={(e) => setFormDate(e.target.value)} 
+                                     className={inputClass + ' cursor-pointer'}
+                                     max={formatDateToInput(new Date())} 
+                                     disabled={isSaving}
+                                 />
+                             </div>
+
+                             {/* Monto */}
+                             {(ventaType === 'manual' || formTipo === 'Gasto') ? (
+                                 <div>
+                                     <label className="text-xs font-medium text-slate-600 mb-1 block">Monto</label>
+                                     <div className="relative">
+                                         <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 text-sm">$</span>
+                                         <input 
+                                             type="number" 
+                                             value={formMonto} 
+                                             onChange={(e) => setFormMonto(e.target.value)} 
+                                             className={`${inputClass} pl-6 font-medium ${formTipo === 'Ingreso' ? 'text-emerald-700' : 'text-red-700'}`}
+                                             placeholder="0.00" 
+                                             min="0"
+                                             disabled={isSaving}
+                                         />
+                                     </div>
+                                 </div>
+                             ) : (
+                                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                                     <p className="text-xs text-slate-500">Monto del servicio</p>
+                                     <p className={`font-bold text-lg ${formTipo === 'Ingreso' ? 'text-emerald-700' : 'text-red-700'}`}>
+                                         {formatCurrency(Number(formMonto || 0))}
+                                     </p>
+                                 </div>
+                             )}
+
+                             {/* Descripción */}
+                             <div>
+                                 <label className="text-xs font-medium text-slate-600 mb-1 block">Descripción</label>
+                                 <textarea 
+                                     rows={2}
+                                     value={formDescripcion} 
+                                     onChange={(e) => setFormDescripcion(e.target.value)} 
+                                     className={inputClass}
+                                     placeholder={formTipo === 'Ingreso' ? "Venta de corte y barba" : "Compra de navajas"} 
+                                     disabled={isSaving}
+                                 />
+                             </div>
+
+                             <div className="flex gap-3 pt-2">
+                                 <button 
+                                     onClick={closeModal}
+                                     className={btnSecondary + ' cursor-pointer'}
+                                     disabled={isSaving}
+                                 >
+                                     Cancelar
+                                 </button>
+                                 <button 
+                                     onClick={handleSave}
+                                     className={`${btnPrimary} cursor-pointer flex items-center justify-center gap-2`}
+                                     disabled={formTipo === 'Ingreso' && !formBarberId || isSaving}
+                                 >
+                                     {isSaving ? (
+                                         <>
+                                             <IconSpinner />
+                                             Guardando...
+                                         </>
+                                     ) : "Registrar Transacción"}
+                                 </button>
+                             </div>
+                         </div>
+                     </div>
+                 </div>
             )}
-          </div>
-        </div>
 
-        {/* Upcoming appointments (Quick Action List) */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col h-[460px]">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-            <h3 className="text-sm font-semibold text-slate-900">
-              Acciones Rápidas - Turnos Pendientes
-            </h3>
-            
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-slate-500 hidden sm:inline">Filtrar:</span>
-              <select
-                value={selectedBarberId}
-                onChange={(e) => setSelectedBarberId(e.target.value)}
-                className="px-2 py-1 rounded-md border cursor-pointer border-slate-200 text-slate-700 text-xs focus:ring-slate-800"
-              >
-                <option value="all">General</option>
-                {empleadosList.map(emp => (
-                    <option key={emp.id} value={emp.id}>{emp.nombre}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto custom-scrollbar px-5 py-3 space-y-3">
-            {loadingLists ? (
-                   <div className="text-center py-12 text-sm text-slate-500">Cargando turnos...</div>
-            ) : timelineAppointments.length === 0 ? (
-                <div className="text-center py-12 text-sm text-slate-400">No hay turnos pendientes para {selectedBarberId === 'all' ? 'hoy' : 'este barbero'}.</div>
-            ) : (
-                <>
-                    {timelineAppointments.map((turno) => (
-                        <div key={turno.id} className="border border-slate-100 rounded-xl px-3 py-2 hover:border-slate-200 hover:bg-slate-50 transition flex justify-between items-center">
-                            <div>
-                                <p className="text-[11px] font-medium text-slate-600">
-                                    {turno.hora}
-                                </p>
-                                <p className="text-sm font-semibold text-slate-900">
-                                    {turno.clientName}
-                                </p>
-                                <p className="text-xs text-slate-500">
-                                    {turno.servicio} · {turno.barberName}
-                                </p>
-                            </div>
-                            <div className="flex gap-2">
-                                <button 
-                                    onClick={() => handleQuickFinalize(turno)}
-                                    className="p-2 cursor-pointer bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition active:scale-95"
-                                    title="Finalizar Turno"
-                                >
-                                    <IconCheck />
-                                </button>
-                                <button 
-                                    onClick={() => handleQuickCancel(turno)}
-                                    className="p-2 cursor-pointer bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition active:scale-95"
-                                    title="Cancelar Turno"
-                                >
-                                    <IconTrash />
-                                </button>
-                            </div>
-                        </div>
-                    ))}
-                </>
+            {/* MODAL DE CONFIRMACIÓN CUSTOM */}
+            {confirmOpen && (
+                 <div 
+                     className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm transition-opacity"
+                     onClick={() => setConfirmOpen(false)}
+                 >
+                     <div 
+                         ref={confirmModalRef} 
+                         className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl animate-fadeIn text-center" 
+                         onClick={(e) => e.stopPropagation()}
+                     >
+                         <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                             <IconAlert />
+                         </div>
+                         <h3 className="text-lg font-bold text-slate-900 mb-2">
+                             {confirmConfig.title}
+                         </h3>
+                         <p className="text-sm text-slate-500 mb-6 px-2 leading-relaxed">
+                             {confirmConfig.message}
+                         </p>
+                         <div className="flex gap-3">
+                             <button 
+                                 onClick={() => setConfirmOpen(false)} 
+                                 className={`${btnSecondary} font-medium text-sm`}
+                                 disabled={isConfirmingAction}
+                             >
+                                 Cancelar
+                             </button>
+                             <button 
+                                 onClick={executeConfirmAction} 
+                                 className={`flex-1 py-2.5 rounded-lg text-white font-bold text-sm shadow-sm active:scale-95 transition flex items-center justify-center gap-2 ${confirmConfig.isDanger ? "bg-red-600 hover:bg-red-700" : "bg-slate-900 hover:bg-slate-800"}`}
+                                 disabled={isConfirmingAction} // ⭐ Bloquea el botón de confirmación
+                             >
+                                 {isConfirmingAction ? (
+                                     <>
+                                         <IconSpinner />
+                                         Cargando...
+                                     </>
+                                 ) : confirmConfig.confirmText}
+                             </button>
+                         </div>
+                     </div>
+                 </div>
             )}
-          </div>
         </div>
-      </div>
-
-      {/* =========================================
-          MODAL DE VENTA RÁPIDA (Copiado de Ventas.tsx)
-      ========================================= */}
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-          <div 
-            ref={modalRef}
-            className="bg-white rounded-2xl w-full max-w-md p-6 shadow-xl animate-fadeIn"
-            onClick={(e) => e.stopPropagation()} // Detener propagación para click-outside
-          >
-            <h3 className="text-lg font-semibold text-slate-900 mb-4">
-              Nueva Venta Rápida
-            </h3>
-            
-            <div className="space-y-4">
-              
-              {/* Tipo de Transacción (Ingreso/Gasto) */}
-              <div>
-                <label className="text-xs font-medium text-slate-600 mb-1 block">Tipo de Monto</label>
-                <div className="flex space-x-4">
-                  <button 
-                    onClick={() => {
-                        setFormTipo('Ingreso');
-                        // Restaurar selección de empleado y tipo de venta al cambiar a Ingreso
-                        setFormBarberId(empleadosList[0]?.id || '');
-                        setVentaType(servicios.length > 0 ? 'servicio' : 'manual');
-                    }}
-                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 cursor-pointer ${
-                      formTipo === 'Ingreso' 
-                        ? 'bg-emerald-50 border-emerald-500 text-emerald-800' 
-                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                    }`}
-                  >
-                    Ingreso (+)
-                  </button>
-                  <button 
-                    onClick={() => {
-                        setFormTipo('Gasto');
-                        // Anular selección de empleado al cambiar a Gasto
-                        setFormBarberId('');
-                    }}
-                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 cursor-pointer ${
-                      formTipo === 'Gasto' 
-                        ? 'bg-red-50 border-red-500 text-red-800' 
-                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                    }`}
-                  >
-                    Gasto (-)
-                  </button>
-                </div>
-              </div>
-              
-              {/* Selector de Empleado (solo si es tipo Ingreso) */}
-              {formTipo === 'Ingreso' && empleadosList.length > 0 && (
-                  <div className="border-t border-slate-100 pt-4">
-                      <label className="text-xs font-medium text-slate-600 mb-1 block">Barbero Asignado (Obligatorio)</label>
-                      <select
-                          value={formBarberId}
-                          onChange={(e) => setFormBarberId(e.target.value)}
-                          className={inputClass + ' cursor-pointer'}
-                      >
-                          <option value="">-- Selecciona un Barbero --</option>
-                          {empleadosList.map((e) => (
-                              <option key={e.id} value={e.id}>
-                                  {e.nombre}
-                              </option>
-                          ))}
-                      </select>
-                      {/* Mostrar advertencia si el empleado no está seleccionado y se intenta guardar */}
-                      {!formBarberId && <p className="text-xs text-red-500 mt-1">
-                          Debe asignar esta venta a un empleado para el cálculo de comisiones.
-                      </p>}
-                  </div>
-              )}
-              {formTipo === 'Ingreso' && empleadosList.length === 0 && (
-                  <p className="text-xs text-red-500 mt-1">
-                      ADVERTENCIA: No hay empleados registrados para asignar la venta.
-                  </p>
-              )}
-
-
-              {/* Selector de Venta (Servicio vs Manual) */}
-              {formTipo === 'Ingreso' && (
-                <div className="border-t border-slate-100 pt-4">
-                    <label className="text-xs font-medium text-slate-600 mb-1 block">Origen del Ingreso</label>
-                    <div className="flex space-x-4 mb-3">
-                        <button 
-                            onClick={() => { setVentaType('servicio'); setSelectedServiceId(servicios[0]?.id || ''); }}
-                            className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors border-2 cursor-pointer ${
-                                ventaType === 'servicio' 
-                                    ? 'bg-slate-800 border-slate-900 text-white' 
-                                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                            }`}
-                            disabled={servicios.length === 0}
-                        >
-                            Venta de Servicio
-                        </button>
-                        <button 
-                            onClick={() => { setVentaType('manual'); setSelectedServiceId(''); }}
-                            className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors border-2 cursor-pointer ${
-                                ventaType === 'manual' 
-                                    ? 'bg-slate-800 border-slate-900 text-white' 
-                                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                            }`}
-                        >
-                            Venta/Ingreso Manual
-                        </button>
-                    </div>
-
-                    {/* Selector de Servicio (solo si es tipo Ingreso y Venta de Servicio) */}
-                    {ventaType === 'servicio' && servicios.length > 0 && (
-                        <div>
-                            <select
-                                value={selectedServiceId}
-                                onChange={(e) => setSelectedServiceId(e.target.value)}
-                                className={inputClass + ' cursor-pointer'}
-                            >
-                                {servicios.map((s) => (
-                                    <option key={s.id} value={s.id}>
-                                        {s.nombre} - {formatCurrency(s.precio)}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                    )}
-                    {ventaType === 'servicio' && servicios.length === 0 && (
-                        <p className="text-xs text-red-500 mt-1">No hay servicios registrados. Usa el modo manual.</p>
-                    )}
-                </div>
-              )}
-              
-              {/* Fecha de Registro */}
-              <div className="border-t border-slate-100 pt-4">
-                <label className="text-xs font-medium text-slate-600 mb-1 block">Fecha de Transacción</label>
-                <input 
-                  type="date" 
-                  value={formDate} 
-                  onChange={(e) => setFormDate(e.target.value)} 
-                  className={inputClass + ' cursor-pointer'}
-                  max={formatDateToInput(new Date())} // No permitir fechas futuras
-                />
-              </div>
-
-              {/* Monto (solo editable en modo manual o gasto) */}
-              {(ventaType === 'manual' || formTipo === 'Gasto') ? (
-                <div>
-                  <label className="text-xs font-medium text-slate-600 mb-1 block">Monto</label>
-                  <div className="relative">
-                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 text-sm">$</span>
-                    <input 
-                      type="number" 
-                      value={formMonto} 
-                      onChange={(e) => setFormMonto(e.target.value)} 
-                      className={`${inputClass} pl-6 font-medium ${formTipo === 'Ingreso' ? 'text-emerald-700' : 'text-red-700'}`}
-                      placeholder="0.00" 
-                      min="0"
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                    <p className="text-xs text-slate-500">Monto del servicio</p>
-                    <p className={`font-bold text-lg ${formTipo === 'Ingreso' ? 'text-emerald-700' : 'text-red-700'}`}>
-                        {formatCurrency(Number(formMonto || 0))}
-                    </p>
-                </div>
-              )}
-
-              {/* Descripción (siempre editable, pero auto-rellenable) */}
-              <div>
-                <label className="text-xs font-medium text-slate-600 mb-1 block">Descripción</label>
-                <textarea 
-                  rows={2}
-                  value={formDescripcion} 
-                  onChange={(e) => setFormDescripcion(e.target.value)} 
-                  className={inputClass}
-                  placeholder={formTipo === 'Ingreso' ? "Venta de corte y barba" : "Compra de navajas"} 
-                />
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button 
-                  onClick={closeModal}
-                  className={btnSecondary + ' cursor-pointer'}
-                >
-                  Cancelar
-                </button>
-                <button 
-                  onClick={handleSave}
-                  className={btnPrimary + ' cursor-pointer'}
-                  disabled={formTipo === 'Ingreso' && !formBarberId} // Deshabilitar si es ingreso y no hay barbero
-                >
-                  Registrar Transacción
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* =========================================
-          MODAL DE CONFIRMACIÓN CUSTOM (Mantener la lógica si es necesario)
-      ========================================= */}
-      {confirmOpen && (
-        <div 
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm transition-opacity"
-          onClick={() => setConfirmOpen(false)}
-        >
-          <div 
-            ref={confirmModalRef}
-            className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl animate-fadeIn text-center"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
-              <IconAlertModal />
-            </div>
-            
-            <h3 className="text-lg font-bold text-slate-900 mb-2">
-              {confirmConfig.title}
-            </h3>
-            
-            <p className="text-sm text-slate-500 mb-6 px-2 leading-relaxed">
-              {confirmConfig.message}
-            </p>
-            
-            <div className="flex gap-3">
-              <button 
-                onClick={() => setConfirmOpen(false)}
-                className="flex-1 py-2.5 bg-white border cursor-pointer border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 font-medium text-sm transition"
-              >
-                Cancelar
-              </button>
-              <button 
-                onClick={confirmConfig.action}
-                className={`flex-1 py-2.5 rounded-lg text-white font-bold text-sm shadow-sm active:scale-95 transition cursor-pointer ${
-                  confirmConfig.isDanger 
-                    ? "bg-red-600 hover:bg-red-700" 
-                    : "bg-emerald-600 hover:bg-emerald-700" // Usamos esmeralda para acciones que no son peligro
-                }`}
-              >
-                {confirmConfig.confirmText}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-    </div>
-  );
+    );
 };

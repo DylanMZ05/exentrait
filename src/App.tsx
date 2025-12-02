@@ -17,6 +17,8 @@ import Footer from "./components/Footer.tsx";
 // Módulo Barber Manager
 import { BarberApp } from "./barber-manager/BarberApp.tsx";
 
+import AccountDayManager from "./barber-manager/pages/AccountDayMaganer.tsx";
+
 function AppContent() {
   const location = useLocation();
 
@@ -40,6 +42,7 @@ function AppContent() {
           {/* ---- BARBER MANAGER ---- */}
           {/* TODAS LAS RUTAS INTERNAS USAN BarberApp (incluida /ventas) */}
           <Route path="/barber-manager/*" element={<BarberApp />} />
+          <Route path="/barber-manager/admin-master" element={<AccountDayManager />} />
         </Routes>
       </main>
 

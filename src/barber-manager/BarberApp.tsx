@@ -1,13 +1,13 @@
+// src/barber-manager/BarberApp.tsx
 import React from "react";
 import {
-  Routes,
-  Route,
-  Navigate,
-  useLocation,
+    Routes,
+    Route,
+    Navigate,
+    useLocation,
 } from "react-router-dom";
 
 // Components
-// Las rutas se especifican completamente para forzar la resolución
 import { BarberHeader } from "./components/BarberHeader.tsx";
 import { RequireBarberAuth } from "./RequireBarberAuth.tsx";
 
@@ -21,59 +21,67 @@ import { Servicios } from "./pages/Servicios.tsx";
 import { Ventas } from "./pages/Ventas.tsx";
 import { Stock } from "./pages/Stock.tsx";
 import { Configuracion } from "./pages/Configuracion.tsx";
+// IMPORTACIÓN ELIMINADA: import { SeleccionDePerfil } from "./pages/SeleccionDePerfil.tsx";
+
 
 export const BarberApp: React.FC = () => {
-  const location = useLocation();
+    const location = useLocation();
 
-  // Ocultar el header SOLO en /barber-manager/login
-  const isLoginRoute = location.pathname === "/barber-manager/login";
+    // Ocultar el header si la ruta es:
+    // 1. /barber-manager/login
+    const isLoginRoute = location.pathname.includes("/barber-manager/login"); 
 
-  return (
-    <div className="min-h-screen bg-slate-100 flex flex-col">
+    return (
+        <div className="min-h-screen bg-slate-100 flex flex-col">
 
-      {/* HEADER EXCLUSIVO (menos en login) */}
-      {!isLoginRoute && <BarberHeader />}
+            {/* HEADER EXCLUSIVO (solo ocultar en login) */}
+            {!isLoginRoute && <BarberHeader />}
 
-      <div className="flex-1">
-        <Routes>
+            <div className="flex-1">
+                <Routes>
 
-          {/* ========= LOGIN (Pública) ========= */}
-          <Route path="login" element={<BarberLogin />} />
+                    {/* ========= LOGIN (Pública) ========= */}
+                    <Route path="login" element={<BarberLogin />} />
 
-          {/* ========= RUTAS PROTEGIDAS ========= */}
-          <Route element={<RequireBarberAuth />}>
-            
-            <Route path="dashboard" element={<Dashboard />} />
-            
-            <Route path="empleados" element={<Empleados />} />
-            
-            <Route path="clientes" element={<Clientes />} />
+                    {/* ========= RUTA EXCLUSIVA SA (Guardián dentro de SaPanel.tsx) ========= */}
 
-            <Route path="turnos" element={<Turnos />} />
+                    {/* ========= RUTAS PROTEGIDAS (Validadas por RequireBarberAuth) ========= */}
+                    <Route element={<RequireBarberAuth />}>
+                        
+                        {/* RUTAS DEL DASHBOARD (Ahora acceden directamente al pasar la validación) */}
+                        <Route path="dashboard" element={<Dashboard />} />
+                        
+                        <Route path="empleados" element={<Empleados />} />
+                        
+                        <Route path="clientes" element={<Clientes />} />
 
-            <Route path="servicios" element={<Servicios />} />
+                        <Route path="turnos" element={<Turnos />} />
 
-            <Route path="ventas" element={<Ventas />} />
-            
-            <Route path="stock" element={<Stock />} />
+                        <Route path="servicios" element={<Servicios />} />
 
-            <Route path="configuracion" element={<Configuracion />} />
+                        <Route path="ventas" element={<Ventas />} />
+                        
+                        <Route path="stock" element={<Stock />} />
 
-          </Route>
+                        <Route path="configuracion" element={<Configuracion />} />
 
-          {/* ========= DEFAULT / CATCH-ALL ========= */}
-          <Route 
-            path="" 
-            element={<Navigate to="/barber-manager/dashboard" replace />} 
-          />
-          <Route 
-            path="*" 
-            element={<Navigate to="/barber-manager/dashboard" replace />} 
-          />
+                        {/* 🛑 RUTA admin-super ELIMINADA DE AQUÍ, YA QUE ESTÁ ARRIBA FUERA DEL GUARD */}
+                        
+                    </Route>
 
-        </Routes>
-      </div>
+                    {/* ========= DEFAULT / CATCH-ALL ========= */}
+                    <Route 
+                        path="" 
+                        element={<Navigate to="/barber-manager/dashboard" replace />} 
+                    />
+                    <Route 
+                        path="*" 
+                        element={<Navigate to="/barber-manager/dashboard" replace />} 
+                    />
 
-    </div>
-  );
+                </Routes>
+            </div>
+
+        </div>
+    );
 };
