@@ -8,14 +8,20 @@ import {
     deleteDoc,
     doc,
     orderBy,
-    // CORRECCIÓN 3: Importar FieldValue para el uso de serverTimestamp
     serverTimestamp,
     Timestamp,
     query as firestoreQuery,
     increment,
-    FieldValue, // Importar FieldValue para usar serverTimestamp()
+    FieldValue,
+    where, 
 } from "firebase/firestore";
 import { barberDb, barberAuth } from "../services/firebaseBarber";
+
+// ⭐ VALOR POR DEFECTO para empleados sin prioridad (debe coincidir con Empleados.tsx)
+const DEFAULT_PRIORITY = 999; 
+
+// ⭐ NUEVO TIPADO DE MÉTODOS DE PAGO
+type PaymentMethod = 'Efectivo' | 'Transferencia' | 'QR/Tarjeta' | 'N/A'; // N/A para Gastos
 
 // Tipado para la transacción
 interface Transaccion {
@@ -24,7 +30,6 @@ interface Transaccion {
     descripcion: string;
     tipo: 'Ingreso' | 'Gasto';
     createdAt: Timestamp;
-    // CORRECCIÓN 3: El tipo puede ser Timestamp o FieldValue (si es serverTimestamp())
     updatedAt?: Timestamp | FieldValue;
     date: string;
     barberId: string | null;
@@ -32,8 +37,8 @@ interface Transaccion {
     servicioId: string | null;
     clienteId?: string | null;
     clienteNombre?: string | null;
-    // ⭐ Nueva propiedad para fijar el porcentaje al momento de la venta
     comisionAplicada?: number | null; 
+    metodoPago?: PaymentMethod;
 }
 
 // Tipado para el Servicio
@@ -49,6 +54,8 @@ interface Empleado {
     nombre: string;
     porcentaje: number;
     internalEmail?: string;
+    prioridad?: number; 
+    activo?: boolean;
 }
 
 // Tipado para Cliente
@@ -72,8 +79,8 @@ interface TransaccionGroup {
 interface LiquidacionItem {
     barberId: string;
     totalVentas: number;
-    comision: number; // Comisión total basada en el porcentaje fijo de cada venta
-    porcentaje: number; // Porcentaje actual (solo informativo)
+    comision: number;
+    porcentaje: number;
     nombre: string;
 }
 
@@ -127,6 +134,20 @@ const IconSpinner = ({ color = 'text-blue-600' }) => (
     </svg>
 );
 
+// ⭐ Iconos de Método de Pago (REINTRODUCIDO)
+const PaymentMethodIcon: React.FC<{ method: PaymentMethod | undefined }> = ({ method }) => {
+    switch (method) {
+        case 'Efectivo':
+            return <span className="text-sm">💵</span>;
+        case 'Transferencia':
+            return <span className="text-sm">💳</span>;
+        case 'QR/Tarjeta':
+            return <span className="text-sm">📲</span>;
+        default:
+            return <span className="text-sm">💸</span>;
+    }
+};
+
 
 /* ============================================================
     COMPONENTES REUTILIZABLES DE UI
@@ -146,7 +167,8 @@ const CollapsibleSection: React.FC<{
     
     const toggle = (e: React.MouseEvent) => {
         const target = e.target as HTMLElement;
-        if (target.tagName.toLowerCase() === 'button' || target.tagName.toLowerCase() === 'a') {
+        // Evitar que el clic en botones o selects dentro de la cabecera colapse la sección
+        if (target.tagName.toLowerCase() === 'button' || target.tagName.toLowerCase() === 'a' || target.tagName.toLowerCase() === 'select') {
             return;
         }
         setIsOpen(!isOpen);
@@ -186,11 +208,17 @@ const formatDateToInput = (date: Date): string => {
     return `${year}-${month}-${day}`;
 };
 
+const getDateNDaysAgo = (n: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() - n);
+    return formatDateToInput(d);
+};
+
+
 const groupTransaccionesByDate = (transacciones: Transaccion[]): TransaccionGroup => {
     const grouped: TransaccionGroup = {};
 
     transacciones.forEach(t => {
-        // Asegurar que la propiedad 'date' exista y sea un string
         if (!t.date || typeof t.date !== 'string') return;
         
         const [yearStr, monthStr, dayStr] = t.date.split('-'); 
@@ -216,69 +244,56 @@ const groupTransaccionesByDate = (transacciones: Transaccion[]): TransaccionGrou
 // incluyendo la lógica de fallback para transacciones antiguas y la exclusión del Dueño.
 const calculateTotals = (transacciones: Transaccion[], currentOwnerUid: string | undefined, empleadosList: Empleado[], isEmployeeView: boolean) => { 
     
-    // Declaramos todas las variables mutables con 'let'
     let gastos = transacciones
         .filter(t => t.tipo === 'Gasto')
         .reduce((sum, t) => sum + t.monto, 0);
     
     let comisionesGanadas = transacciones
-        .filter(t => t.tipo === 'Ingreso' && t.barberId) // Solo Ingresos con barbero
+        .filter(t => t.tipo === 'Ingreso' && t.barberId)
         .reduce((sum, t) => {
             
-            // Lógica de Fallback para porcentaje fijo (ya implementada)
             let porcentajeFijo = t.comisionAplicada ?? 0;
             
             if (porcentajeFijo === 0 && !t.comisionAplicada) {
                 const empleado = empleadosList.find(e => e.id === t.barberId);
-                porcentajeFijo = empleado ? empleado.porcentaje : 0;
+                porcentajeFijo = empleado ? empleado.porcentaje : 0; 
             }
             
             const porcentaje = porcentajeFijo / 100;
             return sum + (t.monto * porcentaje);
         }, 0); 
         
-    // --- Lógica Condicional para Ingresos y Neto ---
     let ingresosCalculados = 0;
     let netoCalculado = 0;
     let comisionesPagadas = 0;
 
     if (isEmployeeView) {
-        // ⭐ MODO EMPLEADO: Los ingresos son las comisiones ganadas
         ingresosCalculados = comisionesGanadas;
-        // El neto del empleado es: Comisiones Ganadas - Gastos Propios
         netoCalculado = ingresosCalculados - gastos;
-        comisionesPagadas = 0; // No aplica el descuento aquí
+        comisionesPagadas = 0;
 
     } else {
-        // MODO DUEÑO (Neto Real de la Barbería)
         ingresosCalculados = transacciones
             .filter(t => t.tipo === 'Ingreso')
             .reduce((sum, t) => sum + t.monto, 0);
             
-        // El neto del Dueño es: Ingresos Brutos - Gastos - Comisiones Pagadas a Empleados
         comisionesPagadas = transacciones
             .filter(t => t.tipo === 'Ingreso' && t.barberId && t.barberId !== currentOwnerUid)
             .reduce((sum, t) => {
-                // Lógica de Fallback para porcentaje fijo (ya implementada)
                 let porcentajeFijo = t.comisionAplicada ?? 0;
                 if (porcentajeFijo === 0 && !t.comisionAplicada) {
                     const empleado = empleadosList.find(e => e.id === t.barberId);
                     porcentajeFijo = empleado ? empleado.porcentaje : 0;
                 }
-                // Excluir si el porcentaje es 100% (seguro)
                 if (porcentajeFijo >= 100) return sum;
                 return sum + (t.monto * (porcentajeFijo / 100));
             }, 0); 
             
         netoCalculado = ingresosCalculados - gastos - comisionesPagadas;
         
-        // Reasignamos comisionesGanadas para que contenga el valor de las comisiones pagadas a empleados
-        // ⭐ CORRECCIÓN: Esta línea causaba el error TS2588. Se debe usar 'let' o se elimina si solo era temporal.
-        // Lo cambiamos para que refleje el valor final de comisiones descontadas en el modo Dueño.
         comisionesGanadas = comisionesPagadas;
     }
 
-    // Devolvemos el resultado adecuado para la vista actual
     return { ingresos: ingresosCalculados, gastos, comisiones: comisionesPagadas, neto: netoCalculado };
 };
 
@@ -314,19 +329,25 @@ export const Ventas: React.FC = () => {
     // ⭐ ESTADOS DE BLOQUEO DE UI
     const [isSaving, setIsSaving] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
-    // ⭐ FIN ESTADOS DE BLOQUEO
 
     const deleteModalRef = useRef<HTMLDivElement>(null);
 
-    // Filtros
+    // Filtros de Periodo (por Mes/Día o Rango)
     const today = new Date();
     const [selectedMonth, setSelectedMonth] = useState(today.getMonth() + 1);
     const [selectedYear, setSelectedYear] = useState(today.getFullYear());
     const [selectedDay, setSelectedDay] = useState(today.getDate());
-    // ⭐ Por defecto, Periodo: DÍA
-    const [filterByMode, setFilterByMode] = useState<'day' | 'month'>('day'); 
+    
+    // ⭐ MODIFICACIÓN: Nuevo filtro 'range'
+    const [filterByMode, setFilterByMode] = useState<'day' | 'month' | 'range'>('day'); 
+    
+    // ⭐ NUEVOS ESTADOS PARA FILTRO POR RANGO
+    const [startDate, setStartDate] = useState(getDateNDaysAgo(6));
+    const [endDate, setEndDate] = useState(formatDateToInput(today));
     
     const [filterBarberId, setFilterBarberId] = useState<string>('all');
+    // ⭐ NUEVO ESTADO PARA FILTRAR POR MÉTODO DE PAGO
+    const [filterPaymentMethod, setFilterPaymentMethod] = useState<PaymentMethod | 'all'>('all');
     
     // Estados del formulario
     const [currentId, setCurrentId] = useState<string | null>(null);
@@ -340,6 +361,8 @@ export const Ventas: React.FC = () => {
 
     // Empleado Asignado
     const [selectedBarberId, setSelectedBarberId] = useState<string>('');
+    // ⭐ NUEVO ESTADO DE PAGO PARA EL FORMULARIO
+    const [formMetodoPago, setFormMetodoPago] = useState<PaymentMethod>('Efectivo');
 
     // Cliente Asignado y Creación Rápida
     const [selectedClienteId, setSelectedClienteId] = useState<string>('');
@@ -372,6 +395,27 @@ export const Ventas: React.FC = () => {
             setFilterBarberId(loggedInEmployee.id);
         }
     }, [isEmployeeMode, loggedInEmployee, filterBarberId]);
+    
+    // ⭐ CÁLCULO DE LISTA ORDENADA PARA EL MODAL DE VENTA
+    const sortedBarbers = useMemo(() => {
+        const activeBarbers = empleados.filter(e => e.activo !== false); // Filtra los activos
+        
+        if (isEmployeeMode && uid) {
+            const myId = uid;
+            const myEmployee = activeBarbers.find(e => e.id === myId);
+            const others = activeBarbers.filter(e => e.id !== myId);
+            
+            // Ordena a los demás por prioridad (si el campo existe)
+            others.sort((a, b) => (a.prioridad || DEFAULT_PRIORITY) - (b.prioridad || DEFAULT_PRIORITY));
+            
+            // Coloca al empleado actual de primero si existe
+            return myEmployee ? [myEmployee, ...others] : others;
+        }
+
+        // Modo Dueño: Ordena estrictamente por prioridad (la más baja es primero)
+        return activeBarbers.sort((a, b) => (a.prioridad || DEFAULT_PRIORITY) - (b.prioridad || DEFAULT_PRIORITY));
+
+    }, [empleados, isEmployeeMode, uid]);
 
 
     /* ============================================================
@@ -386,8 +430,8 @@ export const Ventas: React.FC = () => {
         const _uid = effectiveBarberieUid;
 
         try {
-            // Cargar Empleados
-            const qEmpleados = firestoreQuery(collection(barberDb, `barber_users/${_uid}/empleados`), orderBy("nombre", "asc"));
+            // Cargar Empleados (incluyendo prioridad)
+            const qEmpleados = firestoreQuery(collection(barberDb, `barber_users/${_uid}/empleados`), orderBy("nombre", "asc")); 
             const snapEmpleados = await getDocs(qEmpleados);
             const empleadosList: Empleado[] = [];
             snapEmpleados.forEach((d) => empleadosList.push({ id: d.id, ...d.data() } as Empleado));
@@ -399,13 +443,6 @@ export const Ventas: React.FC = () => {
             const clientesList: Cliente[] = [];
             snapClientes.forEach((d) => clientesList.push({ id: d.id, ...d.data() } as Cliente));
             setClientes(clientesList);
-
-            if (uid && !selectedBarberId) {
-                setSelectedBarberId(uid);
-            }
-            else if (!uid && empleadosList.length > 0) {
-                setSelectedBarberId(empleadosList[0].id);
-            }
 
             // Cargar Ventas
             let ventasQuery: any[] = [];
@@ -430,6 +467,7 @@ export const Ventas: React.FC = () => {
                     clienteId: data.clienteId || null,
                     clienteNombre: data.clienteNombre || null,
                     comisionAplicada: data.comisionAplicada || null, // Carga el porcentaje fijo
+                    metodoPago: data.metodoPago || (data.tipo === 'Ingreso' ? 'Efectivo' : 'N/A'), // ⭐ Carga el método de pago (con fallback)
                 } as Transaccion)
             });
             setTransacciones(list);
@@ -445,7 +483,7 @@ export const Ventas: React.FC = () => {
             console.error("Error cargando datos:", err);
         }
         setLoading(false);
-    }, [effectiveBarberieUid, uid, selectedBarberId]); 
+    }, [effectiveBarberieUid]); 
 
     useEffect(() => {
         if (effectiveBarberieUid) {
@@ -455,51 +493,69 @@ export const Ventas: React.FC = () => {
 
 
     // ============================================================
-    // LÓGICA DE FILTRADO
+    // LÓGICA DE FILTRADO Y RESÚMENES
     // ============================================================
 
     const allFilteredTransacciones = useMemo(() => {
-        let currentFiltered = transacciones.filter(t => {
-             const tYear = Number(t.date.substring(0, 4));
-             return tYear === selectedYear;
-        });
+        let currentFiltered = transacciones;
 
-        if (selectedMonth > 0) {
+        if (filterByMode === 'month') {
+            currentFiltered = currentFiltered.filter(t => {
+                const tYear = Number(t.date.substring(0, 4));
+                const tMonth = Number(t.date.substring(5, 7));
+                return tYear === selectedYear && (selectedMonth === 0 || tMonth === selectedMonth);
+            });
+        } else if (filterByMode === 'day') {
              currentFiltered = currentFiltered.filter(t => {
+                 const tYear = Number(t.date.substring(0, 4));
                  const tMonth = Number(t.date.substring(5, 7));
-                 return tMonth === selectedMonth;
-             });
-        }
-
-        if (filterByMode === 'day' && selectedDay > 0) {
-             currentFiltered = currentFiltered.filter(t => {
                  const tDay = Number(t.date.substring(8, 10)); 
-                 return tDay === selectedDay;
+                 return tYear === selectedYear && tMonth === selectedMonth && tDay === selectedDay;
+             });
+        } else if (filterByMode === 'range') {
+             // ⭐ FILTRO POR RANGO DE FECHAS
+             const start = startDate;
+             const end = endDate;
+
+             currentFiltered = currentFiltered.filter(t => {
+                 // t.date tiene formato 'YYYY-MM-DD' y es comparable directamente
+                 return t.date >= start && t.date <= end;
              });
         }
         
         return currentFiltered;
 
-    }, [transacciones, selectedYear, selectedMonth, selectedDay, filterByMode]); 
+    }, [transacciones, selectedYear, selectedMonth, selectedDay, filterByMode, startDate, endDate]); 
 
     const finalDisplayedTransacciones = useMemo(() => {
         let filtered = allFilteredTransacciones;
         
         if (isEmployeeMode) {
-             return allFilteredTransacciones.filter(t => t.barberId === loggedInEmployee?.id);
+             filtered = filtered.filter(t => t.barberId === loggedInEmployee?.id);
         }
         
-        if (filterBarberId !== 'all') {
+        // ⭐ Filtro de Barbero: SOLO APLICA EN MODO 'ventas' Y SI NO ES EMPLEADO
+        if (viewMode === 'ventas' && !isEmployeeMode && filterBarberId !== 'all') {
              filtered = filtered.filter(t => t.barberId === filterBarberId);
+        }
+
+        // ⭐ Filtro de Método de Pago: SOLO APLICA EN MODO 'ventas'
+        if (viewMode === 'ventas' && filterPaymentMethod !== 'all') {
+             filtered = filtered.filter(t => 
+                (t.tipo === 'Gasto' && filterPaymentMethod === 'N/A') || 
+                (t.tipo === 'Ingreso' && t.metodoPago === filterPaymentMethod)
+             );
         }
         
         return filtered;
-    }, [allFilteredTransacciones, filterBarberId, isEmployeeMode, loggedInEmployee?.id]);
+    }, [allFilteredTransacciones, filterBarberId, isEmployeeMode, loggedInEmployee?.id, filterPaymentMethod, viewMode]);
 
 
     const groupedTransacciones = useMemo(() => {
-        return groupTransaccionesByDate(finalDisplayedTransacciones);
-    }, [finalDisplayedTransacciones]);
+        // En vista 'liquidaciones', no agrupamos, en vista 'ventas' sí.
+        const transaccionesToGroup = viewMode === 'ventas' ? finalDisplayedTransacciones : [];
+        return groupTransaccionesByDate(transaccionesToGroup);
+    }, [finalDisplayedTransacciones, viewMode]);
     
     const availableYears = useMemo(() => {
         const years = new Set(transacciones.map(t => Number(t.date.substring(0, 4))));
@@ -512,13 +568,12 @@ export const Ventas: React.FC = () => {
 
         const liquidaciones: { [barberId: string]: LiquidacionItem } = {};
         
-        // Inicializar con empleados actuales para obtener sus datos (nombre, porcentaje actual)
         empleados.forEach(emp => {
             liquidaciones[emp.id] = {
                 barberId: emp.id,
                 totalVentas: 0,
-                comision: 0, // Se inicializa a cero
-                porcentaje: emp.porcentaje, // Se guarda el porcentaje actual (informativo)
+                comision: 0,
+                porcentaje: emp.porcentaje,
                 nombre: emp.nombre
             };
         });
@@ -528,17 +583,15 @@ export const Ventas: React.FC = () => {
                 const monto = t.monto;
                 const empId = t.barberId!;
                 
-                // ⭐ AJUSTE DE FALLBACK: Si comisionAplicada es nula/0, usa el porcentaje actual del empleado.
                 let porcentajeFijo = t.comisionAplicada ?? 0;
-            
-                if (porcentajeFijo === 0 && !t.comisionAplicada) { // Solo si es realmente nulo/undefined
+                
+                if (porcentajeFijo === 0 && !t.comisionAplicada) { 
                     const empleado = empleados.find(e => e.id === empId);
-                    porcentajeFijo = empleado ? empleado.porcentaje : 0;
+                    porcentajeFijo = empleado ? empleado.porcentaje : 0; 
                 }
                 
                 if (liquidaciones[empId]) {
                     liquidaciones[empId].totalVentas += monto;
-                    // Sumar la comisión calculada con el porcentaje FIJO (o fallback) de la transacción.
                     liquidaciones[empId].comision += monto * (porcentajeFijo / 100); 
                 }
             });
@@ -551,16 +604,14 @@ export const Ventas: React.FC = () => {
     
     const employeeLiquidacion = useMemo(() => {
         if (!isEmployeeMode || !uid || !loggedInEmployee) return null;
-
+        
         const employeeSales = allFilteredTransacciones.filter(t => t.barberId === loggedInEmployee.id && t.tipo === 'Ingreso');
         const employeeExpenses = allFilteredTransacciones.filter(t => t.barberId === loggedInEmployee.id && t.tipo === 'Gasto');
         
         const totalVentas = employeeSales.reduce((sum, t) => sum + t.monto, 0);
         const totalGastos = employeeExpenses.reduce((sum, t) => sum + t.monto, 0);
         
-        // ⭐ CÁLCULO DE COMISIÓN (CON FALLBACK): Mantenemos el fallback aquí.
         const comisionGanada = employeeSales.reduce((sum, t) => {
-            // LÓGICA DE FALLBACK: Si comisionAplicada es nula/0, usa el porcentaje actual del empleado.
             let porcentajeFijo = t.comisionAplicada ?? 0;
             
             if (porcentajeFijo === 0 && !t.comisionAplicada) {
@@ -587,10 +638,9 @@ export const Ventas: React.FC = () => {
 
 
     const totalSummary = useMemo(() => {
-        // ⭐ CORRECCIÓN: Usar !!isEmployeeMode para asegurar el tipo boolean
         return calculateTotals(allFilteredTransacciones, effectiveBarberieUid, empleados, !!isEmployeeMode); 
 
-    }, [allFilteredTransacciones, isEmployeeMode, employeeLiquidacion, effectiveBarberieUid, empleados]);
+    }, [allFilteredTransacciones, isEmployeeMode, effectiveBarberieUid, empleados]);
 
     /* ============================================================
         GESTIÓN DE MODAL Y FORMULARIO
@@ -601,12 +651,26 @@ export const Ventas: React.FC = () => {
         setFormDescripcion("");
         setFormTipo('Ingreso');
         setFormDate(formatDateToInput(new Date())); 
+        setFormMetodoPago('Efectivo'); 
         
-        setVentaType('servicio');
+        // ⭐ CAMBIO CLAVE: Priorizar 'servicio' si hay servicios.
+        const hasServices = servicesList.length > 0;
+        setVentaType(hasServices ? 'servicio' : 'manual');
+        
         const defaultServiceId = servicesList[0]?.id || '';
         setSelectedServiceId(defaultServiceId);
 
-        setSelectedBarberId(uid || employeesList[0]?.id || '');
+        // ⭐ Lógica de preselección usando sortedBarbers
+        const firstBarber = sortedBarbers[0];
+        const me = sortedBarbers.find(e => e.id === uid);
+
+        if (isEmployeeMode && me) {
+             setSelectedBarberId(me.id); // Si soy empleado, me preselecciono
+        } else if (firstBarber) {
+             setSelectedBarberId(firstBarber.id); // Si soy dueño o no soy empleado, selecciono el primero de la lista ordenada
+        } else {
+             setSelectedBarberId('');
+        }
         
         // Reset Cliente y Creación
         setSelectedClienteId('');
@@ -615,15 +679,13 @@ export const Ventas: React.FC = () => {
         setNewClientPhone("");
 
         const defaultService = servicesList.find(s => s.id === defaultServiceId);
-        if (defaultService) {
+        if (hasServices && defaultService) {
             setFormDescripcion(`Venta de Servicio: ${defaultService.nombre}`);
             setFormMonto(defaultService.precio.toString());
-        } else {
-            setVentaType('manual');
         }
-
+        
         setIsEditing(false);
-    }, [servicios, empleados, uid]);
+    }, [servicios, empleados, uid, isEmployeeMode, sortedBarbers]);
 
     const openModal = (transaccion?: Transaccion) => {
         if (transaccion) {
@@ -633,15 +695,16 @@ export const Ventas: React.FC = () => {
             setFormDescripcion(transaccion.descripcion);
             setFormTipo(transaccion.tipo);
             setFormDate(transaccion.date || formatDateToInput(transaccion.createdAt.toDate()));
+            setFormMetodoPago(transaccion.metodoPago && transaccion.tipo === 'Ingreso' ? transaccion.metodoPago : 'Efectivo'); 
             
             setVentaType('manual'); 
             setSelectedServiceId('');
             
-            setSelectedBarberId(transaccion.barberId || uid || empleados[0]?.id || '');
+            setSelectedBarberId(transaccion.barberId || uid || sortedBarbers[0]?.id || ''); 
             
             // Cargar cliente si existe
             setSelectedClienteId(transaccion.clienteId || '');
-            setIsCreatingClient(false); // Al editar, no creamos nuevo cliente por defecto
+            setIsCreatingClient(false); 
 
         } else {
             resetForm(servicios, empleados);
@@ -709,15 +772,17 @@ export const Ventas: React.FC = () => {
     const handleSave = async () => {
         if (isSaving) return; // Previene doble click
         
-        // En tu código original, se usa alert(), que está desaconsejado.
-        // Para compilar, usaremos una simple verificación:
         if (!uid || !formMonto || !formDescripcion.trim() || !formDate) {
             console.error("Completa todos los campos.");
             return;
         }
         
-        // Si está creando cliente, validamos nombre
-        if (isCreatingClient && !newClientName.trim()) {
+        if (formTipo === 'Ingreso' && (!selectedBarberId || !formMetodoPago)) {
+            console.error("Debes seleccionar un empleado y método de pago para esta venta.");
+            return;
+        }
+
+        if (formTipo === 'Ingreso' && isCreatingClient && !newClientName.trim()) {
             console.error("Por favor ingresa el nombre del nuevo cliente.");
             return;
         }
@@ -730,18 +795,12 @@ export const Ventas: React.FC = () => {
         
         let barberIdToSave: string | null = null;
         let barberNameToSave: string | null = null;
-        let comisionAplicadaToSave: number | null = null; // ⭐ Variable para el porcentaje fijo
+        let comisionAplicadaToSave: number | null = null;
         
-        // Datos del Cliente
         let clienteIdToSave: string | null = null;
         let clienteNameToSave: string | null = null;
 
         if (formTipo === 'Ingreso') {
-            if (!selectedBarberId) {
-                console.error("Debes seleccionar un empleado para esta venta.");
-                return;
-            }
-            
             const selectedBarber = empleados.find(e => e.id === selectedBarberId);
             if (!selectedBarber) {
                 console.error("Empleado seleccionado no válido.");
@@ -750,12 +809,10 @@ export const Ventas: React.FC = () => {
             
             barberIdToSave = selectedBarberId;
             barberNameToSave = selectedBarber.nombre;
-            // ⭐ Fija el porcentaje de comisión del barbero en la venta
-            comisionAplicadaToSave = selectedBarber.porcentaje; 
+            comisionAplicadaToSave = selectedBarber.porcentaje;
 
             // --- LÓGICA DE CLIENTE ---
             if (isCreatingClient) {
-                // 1. Crear nuevo cliente
                 try {
                     const newClientData = {
                         nombre: newClientName.trim(),
@@ -768,13 +825,11 @@ export const Ventas: React.FC = () => {
                     const docRef = await addDoc(collection(barberDb, `barber_users/${effectiveBarberieUid}/clientes`), newClientData);
                     clienteIdToSave = docRef.id;
                     clienteNameToSave = newClientName.trim();
-                    console.log("Nuevo cliente creado:", clienteNameToSave);
                 } catch (error) {
                     console.error("Error creando cliente rápido:", error);
-                    return; // Retorna sin guardar la transacción
+                    return; 
                 }
             } else if (selectedClienteId) {
-                // Usar cliente existente
                 const selectedCliente = clientes.find(c => c.id === selectedClienteId);
                 if (selectedCliente) {
                     clienteIdToSave = selectedCliente.id;
@@ -794,12 +849,11 @@ export const Ventas: React.FC = () => {
                 servicioId: (ventaType === 'servicio' && selectedServiceId && formTipo === 'Ingreso' && !isEditing) ? selectedServiceId : null, 
                 barberId: barberIdToSave, 
                 barberName: barberNameToSave, 
-                // ⭐ Guardar el porcentaje de comisión fijo si es un Ingreso
                 comisionAplicada: formTipo === 'Ingreso' ? comisionAplicadaToSave : null, 
-                // Guardar datos del cliente
+                metodoPago: formTipo === 'Ingreso' ? formMetodoPago : 'N/A',
                 clienteId: clienteIdToSave,
                 clienteNombre: clienteNameToSave,
-                updatedAt: serverTimestamp(), // Ahora es válido por el tipado de Transaccion
+                updatedAt: serverTimestamp(), 
             };
             
             if (isEditing && currentId) {
@@ -811,26 +865,25 @@ export const Ventas: React.FC = () => {
                     createdAt: serverTimestamp(),
                 });
 
-                // --- LÓGICA DE FIDELIDAD (+1 Visita) ---
+                // --- ⭐ LÓGICA DE FIDELIDAD (+1 Visita) ---
                 if (clienteIdToSave) {
                     try {
                         const clientRef = doc(barberDb, `barber_users/${effectiveBarberieUid}/clientes/${clienteIdToSave}`);
                         await updateDoc(clientRef, {
-                            visitas: increment(1), // Suma 1 visita (0->1 si es nuevo, X->X+1 si existe)
+                            visitas: increment(1), 
                             ultimaVisita: serverTimestamp()
                         });
-                        console.log("Fidelidad +1 para:", clienteNameToSave);
                     } catch (fidelityError) {
                         console.error("Error actualizando fidelidad:", fidelityError);
                     }
                 }
+                // --- ⭐ FIN LÓGICA FIDELIDAD ⭐ ---
             }
 
             closeModal();
             loadTransacciones(); 
         } catch (e) {
             console.error(e);
-            // Reemplazando alert() por console.error()
             console.error("Error al guardar la transacción.");
         } finally {
              setIsSaving(false); // ⭐ DESBLOQUEAR EL BOTÓN
@@ -839,9 +892,8 @@ export const Ventas: React.FC = () => {
 
     const triggerDelete = (transaccion: Transaccion) => {
         if (isEmployeeMode && uid && transaccion.barberId !== uid) {
-             // Reemplazando alert() por console.error()
-            console.error("No tienes permiso para eliminar esta transacción.");
-            return;
+             console.error("No tienes permiso para eliminar esta transacción.");
+             return;
         }
         setTransactionToDelete(transaccion);
         setDeleteConfirmOpen(true);
@@ -859,7 +911,6 @@ export const Ventas: React.FC = () => {
             loadTransacciones();
         } catch (e) {
             console.error(e);
-            // Reemplazando alert() por console.error()
             console.error("Error al eliminar la transacción.");
         } finally {
             setIsDeleting(false); // ⭐ DESBLOQUEAR EL BOTÓN
@@ -885,9 +936,9 @@ export const Ventas: React.FC = () => {
 
         let displayAmount = t.monto;
         let displayAmountColor = amountColor;
+        let displayComisionInfo = false;
 
         if (isEmployeeMode && isIngreso && loggedInEmployee) {
-            // ⭐ LÓGICA DE FALLBACK: Si comisionAplicada es nula/0, usa el porcentaje actual del empleado.
             let porcentajeFijo = t.comisionAplicada ?? 0;
             
             if (porcentajeFijo === 0 && !t.comisionAplicada) {
@@ -897,7 +948,8 @@ export const Ventas: React.FC = () => {
             const porcentaje = porcentajeFijo / 100;
             
             displayAmount = t.monto * porcentaje;
-            displayAmountColor = 'text-emerald-700'; 
+            displayAmountColor = 'text-emerald-700';
+            displayComisionInfo = true;
         }
 
         return (
@@ -919,14 +971,23 @@ export const Ventas: React.FC = () => {
                             )}
                             {/* Mostrar Cliente si existe */}
                             {t.clienteNombre && (
-                                <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">
-                                    Cliente: {t.clienteNombre}
-                                </span>
+                                 <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">
+                                     Cliente: {t.clienteNombre}
+                                 </span>
+                            )}
+                            {/* ⭐ MOSTRAR MÉTODO DE PAGO */}
+                            {t.metodoPago && t.tipo === 'Ingreso' && (
+                                 <span className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                     <PaymentMethodIcon method={t.metodoPago} /> {t.metodoPago}
+                                 </span>
                             )}
                         </div>
                         
                         {t.barberName && t.tipo === 'Ingreso' && (
-                            <p className="text-xs text-slate-500 italic mt-0.5">Barbero: {t.barberName}</p>
+                            <p className="text-xs text-slate-500 italic mt-0.5">
+                                Barbero: {t.barberName}
+                                {displayComisionInfo && t.comisionAplicada && ` (${t.comisionAplicada}%)`}
+                            </p>
                         )}
                     </div>
                 </div>
@@ -998,7 +1059,7 @@ export const Ventas: React.FC = () => {
                             <div className="pt-2 flex justify-between text-lg">
                                 <span className="font-bold text-slate-900">NETO REAL:</span>
                                 <span className={`font-bold ${totalSummary.neto >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                                    {formatCurrency(totalSummary.neto)}
+                                     {formatCurrency(totalSummary.neto)}
                                 </span>
                             </div>
                         </>
@@ -1021,7 +1082,7 @@ export const Ventas: React.FC = () => {
                             <div className="pt-2 border-t border-slate-100 flex justify-between text-lg">
                                 <span className="font-bold text-slate-900">NETO LIQUIDABLE:</span>
                                 <span className={`font-bold ${employeeLiquidacion.neto >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                                    {formatCurrency(employeeLiquidacion.neto)}
+                                     {formatCurrency(employeeLiquidacion.neto)}
                                 </span>
                             </div>
                         </>
@@ -1040,8 +1101,10 @@ export const Ventas: React.FC = () => {
             
             {/* FILTROS */}
             <div className="flex mb-4 gap-4 items-center flex-wrap sm:flex-row">
+                
+                {/* Botones de Vista (Ventas / Liquidaciones) */}
                 <button
-                    onClick={() => setViewMode('ventas')}
+                    onClick={() => {setViewMode('ventas'); setFilterBarberId('all'); setFilterPaymentMethod('all'); setFilterByMode('day'); }} // Resetear filtros
                     className={`py-2 px-4 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                         viewMode === 'ventas' ? 'bg-slate-800 text-white' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
                     }`}
@@ -1051,7 +1114,7 @@ export const Ventas: React.FC = () => {
 
                 {!isEmployeeMode && (
                     <button
-                        onClick={() => setViewMode('liquidaciones')}
+                        onClick={() => {setViewMode('liquidaciones'); setFilterBarberId('all'); setFilterPaymentMethod('all'); setFilterByMode('month'); }} // Resetear filtros y forzar a month
                         className={`py-2 px-4 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                             viewMode === 'liquidaciones' ? 'bg-emerald-700 text-white' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
                         }`}
@@ -1060,6 +1123,7 @@ export const Ventas: React.FC = () => {
                     </button>
                 )}
                 
+                {/* Controles de Periodo */}
                 <div className="flex items-center gap-2 text-sm mt-2 sm:mt-0 ml-0 sm:ml-4 flex-wrap">
                     <span className="text-slate-600">Periodo:</span>
                     
@@ -1081,6 +1145,7 @@ export const Ventas: React.FC = () => {
                             onClick={() => { 
                                 setFilterByMode('month'); 
                                 setSelectedDay(0); 
+                                setSelectedMonth(today.getMonth() + 1);
                             }} 
                             className={`py-1.5 px-3 text-xs font-medium transition-colors cursor-pointer ${
                                 filterByMode === 'month' ? 'bg-slate-800 text-white' : 'text-slate-700 hover:bg-slate-100'
@@ -1088,8 +1153,20 @@ export const Ventas: React.FC = () => {
                         >
                             MES
                         </button>
+                        {/* ⭐ NUEVO BOTÓN DE RANGO PERSONALIZADO */}
+                        <button
+                            onClick={() => { 
+                                setFilterByMode('range'); 
+                            }} 
+                            className={`py-1.5 px-3 text-xs font-medium transition-colors cursor-pointer ${
+                                filterByMode === 'range' ? 'bg-slate-800 text-white' : 'text-slate-700 hover:bg-slate-100'
+                            }`}
+                        >
+                            RANGO
+                        </button>
                     </div>
                     
+                    {/* Controles de selección basados en el modo */}
                     {filterByMode === 'month' && (
                         <>
                             <select 
@@ -1129,512 +1206,558 @@ export const Ventas: React.FC = () => {
                             className="p-1.5 border border-slate-300 rounded-lg cursor-pointer text-sm"
                         />
                     )}
+
+                    {/* ⭐ CONTROLES DE RANGO PERSONALIZADO */}
+                    {filterByMode === 'range' && (
+                        <div className="flex gap-2 items-center text-xs">
+                             <span className="text-slate-500">Desde:</span>
+                             <input
+                                 type="date"
+                                 value={startDate}
+                                 onChange={(e) => setStartDate(e.target.value)}
+                                 max={endDate}
+                                 className="p-1.5 border border-slate-300 rounded-lg cursor-pointer"
+                             />
+                             <span className="text-slate-500">Hasta:</span>
+                             <input
+                                 type="date"
+                                 value={endDate}
+                                 onChange={(e) => setEndDate(e.target.value)}
+                                 max={formatDateToInput(today)}
+                                 min={startDate}
+                                 className="p-1.5 border border-slate-300 rounded-lg cursor-pointer"
+                             />
+                        </div>
+                    )}
                 </div>
             </div>
             
             <div className="space-y-3">
-                {/* {(!isEmployeeMode && empleados.length > 0) && (
-                    <div className='flex items-center gap-2 text-sm'>
-                        <span className="text-slate-600 font-medium">Filtrar por Barbero:</span>
+                
+                {/* ⭐ FILTROS ADICIONALES (SOLO EN VISTA DE VENTAS) */}
+                {viewMode === 'ventas' && (
+                    <div className='flex items-center gap-4 text-sm flex-wrap'>
+                        
+                        {/* Filtro Barbero (Solo Dueño) */}
+                        {!isEmployeeMode && empleados.length > 0 && (
+                            <>
+                                <span className="text-slate-600 font-medium">Filtrar por Barbero:</span>
+                                <select
+                                    value={filterBarberId}
+                                    onChange={(e) => setFilterBarberId(e.target.value)}
+                                    className="p-2 border border-slate-300 rounded-lg cursor-pointer text-sm min-w-[150px]"
+                                >
+                                    <option value="all">Todas las ventas (General)</option>
+                                    {empleados.map((e) => (
+                                        <option key={e.id} value={e.id}>
+                                            {e.nombre} {e.id === uid ? '(Dueño)' : ''}
+                                        </option>
+                                    ))}
+                                </select>
+                            </>
+                        )}
+
+                        {/* Filtro por Método de Pago */}
+                        <span className="text-slate-600 font-medium">Método de Pago:</span>
                         <select
-                            value={filterBarberId}
-                            onChange={(e) => setFilterBarberId(e.target.value)}
-                            className="p-2 border border-slate-300 rounded-lg cursor-pointer text-sm"
+                            value={filterPaymentMethod}
+                            onChange={(e) => setFilterPaymentMethod(e.target.value as PaymentMethod | 'all')}
+                            className="p-2 border border-slate-300 rounded-lg cursor-pointer text-sm min-w-[150px]"
                         >
-                            <option value="all">Todas las ventas (General)</option>
-                            {empleados.map((e) => (
-                                <option key={e.id} value={e.id}>
-                                    {e.nombre} {e.id === uid ? '(Dueño)' : ''}
-                                </option>
-                            ))}
+                            <option value="all">Todos los Métodos</option>
+                            <option value="Efectivo">Efectivo</option>
+                            <option value="Transferencia">Transferencia</option>
+                            <option value="QR/Tarjeta">QR / Tarjeta</option>
+                            <option value="N/A">Gastos (-)</option>
                         </select>
                     </div>
-                )} */}
-
-                {isEmployeeMode && (
-                    <div className='flex gap-3'>
-                        <button
-                            onClick={() => setFilterBarberId(loggedInEmployee?.id || 'all')}
-                            className={`py-2 px-4 rounded-lg text-sm font-medium transition-colors border ${
-                                filterBarberId === loggedInEmployee?.id
-                                    ? 'bg-slate-900 text-white'
-                                    : 'bg-white text-slate-700 border-slate-300'
-                            }`}
-                        >
-                            Ver SOLO mis ventas
-                        </button>
-                    </div>
                 )}
-            </div>
-            
-            {/* VISTA DE CONTENIDO */}
-            {viewMode === 'liquidaciones' && !isEmployeeMode ? (
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                     <h3 className="text-lg font-bold text-slate-900 mb-4">
-                        Resumen de Comisiones por Empleado
-                    </h3>
-                    
-                    {loading ? (
-                        <div className="text-center py-12">
+                {/* ⭐ FIN FILTROS ADICIONALES */}
+
+                {/* VISTA DE CONTENIDO */}
+                {viewMode === 'liquidaciones' && !isEmployeeMode ? (
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                        <h3 className="text-lg font-bold text-slate-900 mb-4">
+                            Resumen de Comisiones por Empleado
+                        </h3>
+                        
+                        {loading ? (
+                            <div className="text-center py-12">
+                                <IconSpinner color="text-blue-600" />
+                                <p className="mt-2 text-sm text-slate-500">Cargando transacciones...</p>
+                            </div>
+                        ) : empleados.length === 0 ? (
+                             <p className="text-sm text-red-500 font-medium">
+                                 ERROR: No hay empleados registrados.
+                             </p>
+                        ) : liquidacionDataOwner.length === 0 ? (
+                            <p className="text-sm text-slate-500 italic">
+                                No hay ventas con comisión registradas para el periodo seleccionado.
+                            </p>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {liquidacionDataOwner.map((data, index) => (
+                                    <div key={index} className="bg-emerald-50 p-4 rounded-lg border border-emerald-200">
+                                        <p className="text-sm font-semibold text-slate-900">{data.nombre}</p>
+                                        {/* Muestra el porcentaje actual para fines informativos */}
+                                        <p className="text-xs text-slate-500 mt-1">Comisión actual: {data.porcentaje}%</p>
+                                        
+                                        <div className="mt-3 pt-3 border-t border-emerald-100">
+                                            <div className="flex justify-between text-sm">
+                                                <span>Ventas Totales:</span>
+                                                <span className="font-medium text-slate-700">{formatCurrency(data.totalVentas)}</span>
+                                            </div>
+                                            <div className="flex justify-between text-lg mt-1 font-bold text-emerald-800">
+                                                <span>A Liquidar (Comisión Fija):</span>
+                                                <span>{formatCurrency(data.comision)}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                ) : (
+                    loading ? (
+                        <div className="text-center py-12 flex justify-center items-center min-h-[300px]">
                             <IconSpinner color="text-blue-600" />
                             <p className="mt-2 text-sm text-slate-500">Cargando transacciones...</p>
                         </div>
-                    ) : empleados.length === 0 ? (
-                         <p className="text-sm text-red-500 font-medium">
-                             ERROR: No hay empleados registrados.
-                         </p>
-                    ) : liquidacionDataOwner.length === 0 ? (
-                        <p className="text-sm text-slate-500 italic">
-                            No hay ventas con comisión registradas para este periodo.
-                        </p>
-                    ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {liquidacionDataOwner.map((data, index) => (
-                                <div key={index} className="bg-emerald-50 p-4 rounded-lg border border-emerald-200">
-                                    <p className="text-sm font-semibold text-slate-900">{data.nombre}</p>
-                                    {/* Muestra el porcentaje actual para fines informativos */}
-                                    <p className="text-xs text-slate-500 mt-1">Comisión actual: {data.porcentaje}%</p>
-                                    
-                                    <div className="mt-3 pt-3 border-t border-emerald-100">
-                                        <div className="flex justify-between text-sm">
-                                            <span>Ventas Totales:</span>
-                                            <span className="font-medium text-slate-700">{formatCurrency(data.totalVentas)}</span>
-                                        </div>
-                                        <div className="flex justify-between text-lg mt-1 font-bold text-emerald-800">
-                                            <span>A Liquidar (Comisión Fija):</span>
-                                            <span>{formatCurrency(data.comision)}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            ) : (
-                loading ? (
-                    <div className="text-center py-12 flex justify-center items-center min-h-[300px]">
-                        <IconSpinner color="text-blue-600" />
-                        <p className="mt-2 text-sm text-slate-500">Cargando transacciones...</p>
-                    </div>
-                ) : finalDisplayedTransacciones.length === 0 ? (
-                    <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 border-dashed">
-                        <p className="text-slate-400 mb-2">
-                            No se encontraron transacciones para el periodo seleccionado.
-                        </p>
-                        <button onClick={() => openModal()} className="text-sm cursor-pointer text-slate-900 font-medium hover:underline">
-                            Registrar una nueva ahora
-                        </button>
-                    </div>
-                ) : (
-                    <div className="space-y-4">
-                        {Object.entries(groupedTransacciones).sort(([yearA], [yearB]) => Number(yearB) - Number(yearA)).map(([year, months]) => {
-                            
-                            const monthsObj = months as TransaccionGroup[number];
-                            const yearTransacciones = Object.values(monthsObj)
-                                .flatMap(m => Object.values(m) as Transaccion[][]) 
-                                .flat() as Transaccion[]; 
-                            
-                            // ⭐ CORRECCIÓN: Usar !!isEmployeeMode para asegurar el tipo boolean
-                            const yearTotals = calculateTotals(yearTransacciones, effectiveBarberieUid, empleados, !!isEmployeeMode);
-                            
-                            const yearSummary = (
-                                // Usa Neto Real o Neto Liquidable dependiendo del modo
-                                <span className={`text-base font-bold ${yearTotals.neto >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                                    {isEmployeeMode ? 'Neto Liquidable' : 'Neto Real'}: {formatCurrency(yearTotals.neto)}
-                                </span>
-                            );
-
-                            return (
-                                <CollapsibleSection key={year} title={`Año ${year}`} initialOpen={true} summary={yearSummary}>
-                                    <div className="space-y-3">
-                                        {Object.entries(monthsObj).sort(([monthA], [monthB]) => Number(monthB) - Number(monthA)).map(([month, days]) => {
-                                            
-                                            const monthTransacciones = Object.values(days).flat() as Transaccion[]; 
-                                            // ⭐ CORRECCIÓN: Usar !!isEmployeeMode para asegurar el tipo boolean
-                                            const monthTotals = calculateTotals(monthTransacciones, effectiveBarberieUid, empleados, !!isEmployeeMode);
-                                            
-                                            const monthSummary = (
-                                                 // Usa Neto Real o Neto Liquidable dependiendo del modo
-                                                <span className={`text-sm font-semibold ${monthTotals.neto >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                                    {formatCurrency(monthTotals.neto)}
-                                                </span>
-                                            );
-
-                                            return (
-                                                <CollapsibleSection 
-                                                    key={`${year}-${month}`} 
-                                                    title={monthNames[Number(month) - 1]} 
-                                                    initialOpen={filterByMode === 'month' && Number(month) === selectedMonth} 
-                                                    summary={monthSummary}
-                                                    className="bg-slate-50 border-slate-100"
-                                                >
-                                                    <div className="space-y-2">
-                                                        {Object.entries(days as { [key: string]: Transaccion[] }).sort(([dayA], [dayB]) => Number(dayB) - Number(dayA)).map(([day, dailyTransacciones]) => {
-                                                            
-                                                            // ⭐ CORRECCIÓN: Usar !!isEmployeeMode para asegurar el tipo boolean
-                                                            const dayTotals = calculateTotals(dailyTransacciones, effectiveBarberieUid, empleados, !!isEmployeeMode);
-                                                            
-                                                            const daySummary = (
-                                                                // Usa Neto Real o Neto Liquidable dependiendo del modo
-                                                                <span className={`text-xs font-medium ${dayTotals.neto >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
-                                                                    {formatCurrency(dayTotals.neto)}
-                                                                </span>
-                                                            );
-
-                                                            return (
-                                                                <CollapsibleSection 
-                                                                    key={`${year}-${month}-${day}`} 
-                                                                    title={`Día ${day}`} 
-                                                                    initialOpen={filterByMode === 'day' && Number(day) === selectedDay && Number(month) === selectedMonth} 
-                                                                    summary={daySummary}
-                                                                    className="bg-white border-slate-100/70"
-                                                                >
-                                                                    {dailyTransacciones.map(renderTransaccion)}
-                                                                </CollapsibleSection>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </CollapsibleSection>
-                                            );
-                                        })}
-                                    </div>
-                                </CollapsibleSection>
-                            );
-                        })}
-                    </div>
-                )
-            )}
-
-            {/* MODAL CREAR / EDITAR */}
-            {modalOpen && (
-                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-                    <div 
-                        ref={modalRef} 
-                        className="bg-white rounded-2xl w-full max-w-md p-6 shadow-xl animate-fadeIn max-h-[90vh] overflow-y-auto" // Added max-h and overflow
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <h3 className="text-lg font-semibold text-slate-900 mb-4">
-                            {isEditing ? "Editar Transacción" : "Nueva Venta Rápida"}
-                        </h3>
-                        
-                        <div className="space-y-4">
-                            
-                            {/* Tipo de Transacción */}
-                            <div>
-                                <label className="text-xs font-medium text-slate-600 mb-1 block">Tipo de Monto</label>
-                                <div className="flex space-x-4">
-                                    <button 
-                                        onClick={() => {
-                                            setFormTipo('Ingreso');
-                                            setVentaType(servicios.length > 0 ? 'servicio' : 'manual');
-                                            if (uid) setSelectedBarberId(uid); 
-                                        }}
-                                        disabled={isEditing && currentId !== null || isSaving}
-                                        className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 cursor-pointer ${
-                                            formTipo === 'Ingreso' 
-                                                ? 'bg-emerald-50 border-emerald-500 text-emerald-800' 
-                                                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                                        }`}
-                                    >
-                                        Ingreso (+)
-                                    </button>
-                                    <button 
-                                        onClick={() => {
-                                            setFormTipo('Gasto');
-                                            setVentaType('manual');
-                                            setSelectedBarberId('');
-                                            setSelectedClienteId(''); 
-                                            setIsCreatingClient(false);
-                                        }}
-                                        disabled={isEditing && currentId !== null || isSaving}
-                                        className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 cursor-pointer ${
-                                            formTipo === 'Gasto' 
-                                                ? 'bg-red-50 border-red-500 text-red-800' 
-                                                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                                        }`}
-                                    >
-                                        Gasto (-)
-                                    </button>
-                                </div>
-                            </div>
-                            
-                            {/* Barbero Asignado */}
-                            {formTipo === 'Ingreso' && (
-                                <div className="border-t border-slate-100 pt-4">
-                                    <label className="text-xs font-medium text-slate-600 mb-1 block">
-                                        Barbero Asignado (Obligatorio)
-                                    </label>
-                                    
-                                    {empleados.length > 0 ? (
-                                        <select
-                                            value={selectedBarberId}
-                                            onChange={(e) => setSelectedBarberId(e.target.value)}
-                                            className={inputClass + ' cursor-pointer'}
-                                            disabled={isSaving}
-                                        >
-                                            <option value="">-- Selecciona un Barbero --</option>
-                                            {empleados.map((e) => (
-                                                <option key={e.id} value={e.id}>
-                                                    {e.nombre} {e.id === uid && '(Yo)'}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    ) : (
-                                        <div className="text-xs text-red-500 mt-1 p-2 bg-red-50 rounded">
-                                            ADVERTENCIA: No hay empleados registrados.
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {/* --- SECCIÓN CLIENTE (CON OPCIÓN CREAR RÁPIDO) --- */}
-                            {formTipo === 'Ingreso' && (
-                                <div className="border-t border-slate-100 pt-4">
-                                    <div className="flex justify-between items-center mb-1">
-                                        <label className="text-xs font-medium text-slate-600">
-                                            Asignar Cliente (Opcional)
-                                        </label>
-                                        <button 
-                                            type="button"
-                                            onClick={() => setIsCreatingClient(!isCreatingClient)}
-                                            className="text-[10px] font-bold text-blue-600 hover:underline cursor-pointer"
-                                            disabled={isSaving}
-                                        >
-                                            {isCreatingClient ? "← Seleccionar Existente" : "+ Nuevo Cliente"}
-                                        </button>
-                                    </div>
-                                    
-                                    {isCreatingClient ? (
-                                        // MODO CREAR CLIENTE
-                                        <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 space-y-2 animate-fadeIn">
-                                            <p className="text-xs font-bold text-blue-700 mb-1">Nuevo Cliente Rápido</p>
-                                            <input
-                                                type="text"
-                                                placeholder="Nombre del Cliente"
-                                                value={newClientName}
-                                                onChange={(e) => setNewClientName(e.target.value)}
-                                                className="w-full px-3 py-1.5 bg-white border border-blue-200 rounded text-sm focus:outline-none focus:border-blue-400"
-                                                autoFocus
-                                                disabled={isSaving}
-                                            />
-                                            <input
-                                                type="tel"
-                                                placeholder="Teléfono (Opcional)"
-                                                value={newClientPhone}
-                                                onChange={(e) => setNewClientPhone(e.target.value)}
-                                                className="w-full px-3 py-1.5 bg-white border border-blue-200 rounded text-sm focus:outline-none focus:border-blue-400"
-                                                disabled={isSaving}
-                                            />
-                                            <p className="text-[10px] text-blue-600 mt-1">
-                                                * Se creará y se sumará su primera visita.
-                                            </p>
-                                        </div>
-                                    ) : (
-                                        // MODO SELECCIONAR CLIENTE
-                                        <>
-                                            {clientes.length > 0 ? (
-                                                <select
-                                                    value={selectedClienteId}
-                                                    onChange={(e) => setSelectedClienteId(e.target.value)}
-                                                    className={inputClass + ' cursor-pointer border-blue-200 bg-blue-50/30'}
-                                                    disabled={isSaving}
-                                                >
-                                                    <option value="">-- Cliente Anónimo / Sin Cuenta --</option>
-                                                    {clientes.map((c) => (
-                                                        <option key={c.id} value={c.id}>
-                                                            {c.nombre} {c.visitas ? `(${c.visitas} visitas)` : ''}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            ) : (
-                                                <p className="text-xs text-slate-400 italic mb-2">No tienes clientes registrados aún.</p>
-                                            )}
-                                        </>
-                                    )}
-
-                                    {/* Mensaje de Fidelidad */}
-                                    {(selectedClienteId || isCreatingClient) && (
-                                        <p className="text-[10px] text-emerald-600 mt-1 font-semibold flex items-center gap-1">
-                                            <span>⭐</span> Se sumará 1 turno al historial del cliente.
-                                        </p>
-                                    )}
-                                </div>
-                            )}
-
-                            {/* Origen del Ingreso */}
-                            {formTipo === 'Ingreso' && !isEditing && (
-                                <div className="border-t border-slate-100 pt-4">
-                                    <label className="text-xs font-medium text-slate-600 mb-1 block">Origen del Ingreso</label>
-                                    <div className="flex space-x-4 mb-3">
-                                        <button 
-                                            onClick={() => { setVentaType('servicio'); setSelectedServiceId(servicios[0]?.id || ''); }}
-                                            className={ventaType === 'servicio' ? 'flex-1 py-2 text-sm font-medium rounded-md transition-colors bg-slate-900 text-white shadow' : 'flex-1 py-2 text-sm font-medium rounded-md transition-colors text-slate-500 hover:bg-slate-100'}
-                                            disabled={servicios.length === 0 || isSaving}
-                                        >
-                                            Venta de Servicio
-                                        </button>
-                                        <button 
-                                            onClick={() => { setVentaType('manual'); setSelectedServiceId(''); }}
-                                            className={ventaType === 'manual' ? 'flex-1 py-2 text-sm font-medium rounded-md transition-colors bg-slate-900 text-white shadow' : 'flex-1 py-2 text-sm font-medium rounded-md transition-colors text-slate-500 hover:bg-slate-100'}
-                                            disabled={isSaving}
-                                        >
-                                            Venta/Ingreso Manual
-                                        </button>
-                                    </div>
-
-                                    {ventaType === 'servicio' && servicios.length > 0 && (
-                                        <div>
-                                            <select
-                                                value={selectedServiceId}
-                                                onChange={(e) => setSelectedServiceId(e.target.value)}
-                                                className={inputClass + ' cursor-pointer'}
-                                                disabled={isSaving}
-                                            >
-                                                <option value="">-- Selecciona un Servicio --</option>
-                                                {servicios.map((s) => (
-                                                    <option key={s.id} value={s.id}>
-                                                        {s.nombre} - {formatCurrency(s.precio)}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                            
-                            {/* Fecha */}
-                            <div className="border-t border-slate-100 pt-4">
-                                <label className="text-xs font-medium text-slate-600 mb-1 block">Fecha de Transacción</label>
-                                <input 
-                                    type="date" 
-                                    value={formDate} 
-                                    onChange={(e) => setFormDate(e.target.value)} 
-                                    className={inputClass + ' cursor-pointer'}
-                                    max={formatDateToInput(new Date())} 
-                                    disabled={isSaving}
-                                />
-                            </div>
-
-                            {/* Monto */}
-                            {(ventaType === 'manual' || formTipo === 'Gasto') ? (
-                                <div>
-                                    <label className="text-xs font-medium text-slate-600 mb-1 block">Monto</label>
-                                    <div className="relative">
-                                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 text-sm">$</span>
-                                        <input 
-                                            type="number" 
-                                            value={formMonto} 
-                                            onChange={(e) => setFormMonto(e.target.value)} 
-                                            className={`${inputClass} pl-6 font-medium ${formTipo === 'Ingreso' ? 'text-emerald-700' : 'text-red-700'}`}
-                                            placeholder="0.00" 
-                                            min="0"
-                                            disabled={isSaving}
-                                        />
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                                    <p className="text-xs text-slate-500">Monto del servicio</p>
-                                    <p className={`font-bold text-lg ${formTipo === 'Ingreso' ? 'text-emerald-700' : 'text-red-700'}`}>
-                                        {formatCurrency(Number(formMonto || 0))}
-                                    </p>
-                                </div>
-                            )}
-
-                            {/* Descripción */}
-                            <div>
-                                <label className="text-xs font-medium text-slate-600 mb-1 block">Descripción</label>
-                                <textarea 
-                                    rows={2}
-                                    value={formDescripcion} 
-                                    onChange={(e) => setFormDescripcion(e.target.value)} 
-                                    className={inputClass}
-                                    placeholder={formTipo === 'Ingreso' ? "Venta de corte y barba" : "Compra de navajas"} 
-                                    disabled={isSaving}
-                                />
-                            </div>
-
-                            <div className="flex gap-3 pt-2">
-                                <button 
-                                    onClick={closeModal}
-                                    className={btnSecondary}
-                                    disabled={isSaving}
-                                >
-                                    Cancelar
-                                </button>
-                                <button 
-                                    onClick={handleSave}
-                                    className={btnPrimary}
-                                    disabled={formTipo === 'Ingreso' && !selectedBarberId || isSaving}
-                                >
-                                    {isSaving ? (
-                                        <>
-                                            <IconSpinner color="text-white" />
-                                            Guardando...
-                                        </>
-                                    ) : (isEditing ? "Guardar Cambios" : "Registrar Transacción")}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                 </div>
-            )}
-
-            {/* MODAL ELIMINAR */}
-            {deleteConfirmOpen && transactionToDelete && (
-                 <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-                    <div 
-                        ref={deleteModalRef} 
-                        className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 animate-scaleIn space-y-4"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 rounded-full bg-red-100 text-red-600">
-                                <IconAlert />
-                            </div>
-                            <h3 className="text-lg font-bold text-slate-900">Confirmar Eliminación</h3>
-                        </div>
-                        
-                        <p className="text-sm text-slate-700">
-                            ¿Estás seguro de que deseas eliminar esta transacción? Esta acción es irreversible.
-                        </p>
-
-                        <div className="p-3 border border-slate-100 rounded-lg text-sm bg-slate-50">
-                            <p className="font-semibold">{transactionToDelete.descripcion}</p>
-                            <p className={`text-xs ${transactionToDelete.tipo === 'Ingreso' ? 'text-emerald-600' : 'text-red-600'}`}>
-                                {transactionToDelete.tipo}: {formatCurrency(transactionToDelete.monto)}
+                    ) : finalDisplayedTransacciones.length === 0 ? (
+                        <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 border-dashed">
+                            <p className="text-slate-400 mb-2">
+                                No se encontraron transacciones para el periodo seleccionado.
                             </p>
-                            <p className="text-xs text-slate-400">Fecha: {transactionToDelete.date}</p>
-                            {transactionToDelete.barberName && (
-                                <p className="text-xs text-slate-400">Barbero: {transactionToDelete.barberName}</p>
-                            )}
-                        </div>
-
-                        <div className="flex gap-3 pt-2">
-                            <button 
-                                onClick={() => setDeleteConfirmOpen(false)} 
-                                className={btnSecondary}
-                                disabled={isDeleting}
-                            >
-                                Cancelar
-                            </button>
-                            <button 
-                                onClick={handleDelete} 
-                                className={btnPrimary.replace('bg-slate-900', 'bg-red-600 hover:bg-red-700')}
-                                disabled={isDeleting}
-                            >
-                                {isDeleting ? (
-                                    <>
-                                        <IconSpinner color="text-white" />
-                                        Eliminando...
-                                    </>
-                                ) : "Sí, Eliminar"}
+                            <button onClick={() => openModal()} className="text-sm cursor-pointer text-slate-900 font-medium hover:underline">
+                                Registrar una nueva ahora
                             </button>
                         </div>
-                    </div>
-                 </div>
-            )}
+                    ) : (
+                        <div className="space-y-4">
+                            {Object.entries(groupedTransacciones).sort(([yearA], [yearB]) => Number(yearB) - Number(yearA)).map(([year, months]) => {
+                                
+                                const monthsObj = months as TransaccionGroup[number];
+                                const yearTransacciones = Object.values(monthsObj)
+                                     .flatMap(m => Object.values(m) as Transaccion[][]) 
+                                     .flat() as Transaccion[]; 
+                                
+                                const yearTotals = calculateTotals(yearTransacciones, effectiveBarberieUid, empleados, !!isEmployeeMode);
+                                
+                                const yearSummary = (
+                                     <span className={`text-base font-bold ${yearTotals.neto >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                                         {isEmployeeMode ? 'Neto Liquidable' : 'Neto Real'}: {formatCurrency(yearTotals.neto)}
+                                     </span>
+                                );
 
+                                return (
+                                    <CollapsibleSection key={year} title={`Año ${year}`} initialOpen={filterByMode !== 'range' && filterByMode !== 'day' ? true : false} summary={yearSummary}>
+                                        <div className="space-y-3">
+                                            {Object.entries(monthsObj).sort(([monthA], [monthB]) => Number(monthB) - Number(monthA)).map(([month, days]) => {
+                                                
+                                                const monthTransacciones = Object.values(days).flat() as Transaccion[]; 
+                                                const monthTotals = calculateTotals(monthTransacciones, effectiveBarberieUid, empleados, !!isEmployeeMode);
+                                                
+                                                const monthSummary = (
+                                                     <span className={`text-sm font-semibold ${monthTotals.neto >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                         {formatCurrency(monthTotals.neto)}
+                                                     </span>
+                                                 );
+
+                                                return (
+                                                    <CollapsibleSection 
+                                                        key={`${year}-${month}`} 
+                                                        title={monthNames[Number(month) - 1]} 
+                                                        initialOpen={filterByMode === 'month' && Number(month) === selectedMonth} 
+                                                        summary={monthSummary}
+                                                        className="bg-slate-50 border-slate-100"
+                                                    >
+                                                        <div className="space-y-2">
+                                                            {Object.entries(days as { [key: string]: Transaccion[] }).sort(([dayA], [dayB]) => Number(dayB) - Number(dayA)).map(([day, dailyTransacciones]) => {
+                                                                
+                                                                const dayTotals = calculateTotals(dailyTransacciones, effectiveBarberieUid, empleados, !!isEmployeeMode);
+                                                                
+                                                                const daySummary = (
+                                                                     <span className={`text-xs font-medium ${dayTotals.neto >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                                                                         {formatCurrency(dayTotals.neto)}
+                                                                     </span>
+                                                                 );
+
+                                                                return (
+                                                                    <CollapsibleSection 
+                                                                        key={`${year}-${month}-${day}`} 
+                                                                        title={`Día ${day}`} 
+                                                                        initialOpen={filterByMode === 'day' && Number(day) === selectedDay && Number(month) === selectedMonth} 
+                                                                        summary={daySummary}
+                                                                        className="bg-white border-slate-100/70"
+                                                                    >
+                                                                        {dailyTransacciones.map(renderTransaccion)}
+                                                                    </CollapsibleSection>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </CollapsibleSection>
+                                                );
+                                            })}
+                                        </div>
+                                    </CollapsibleSection>
+                                );
+                            })}
+                        </div>
+                    )
+                )}
+
+                {/* MODAL CREAR / EDITAR */}
+                {modalOpen && (
+                     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+                          <div 
+                               ref={modalRef} 
+                               className="bg-white rounded-2xl w-full max-w-md p-6 shadow-xl animate-fadeIn max-h-[90vh] overflow-y-auto" 
+                               onClick={(e) => e.stopPropagation()}
+                          >
+                               <h3 className="text-lg font-semibold text-slate-900 mb-4">
+                                    {isEditing ? "Editar Transacción" : "Nueva Venta Rápida"}
+                               </h3>
+                               
+                               <div className="space-y-4">
+                                    
+                                    {/* Tipo de Transacción */}
+                                    <div>
+                                         <label className="text-xs font-medium text-slate-600 mb-1 block">Tipo de Monto</label>
+                                         <div className="flex space-x-4">
+                                              <button 
+                                                   onClick={() => {
+                                                        setFormTipo('Ingreso');
+                                                        setVentaType(servicios.length > 0 ? 'servicio' : 'manual');
+                                                        const firstBarber = sortedBarbers[0];
+                                                        setSelectedBarberId(firstBarber?.id || ''); 
+                                                   }}
+                                                   disabled={isEditing && currentId !== null || isSaving}
+                                                   className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 cursor-pointer ${
+                                                        formTipo === 'Ingreso' 
+                                                             ? 'bg-emerald-50 border-emerald-500 text-emerald-800' 
+                                                             : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                                                   }`}
+                                              >
+                                                   Ingreso (+)
+                                              </button>
+                                              <button 
+                                                   onClick={() => {
+                                                        setFormTipo('Gasto');
+                                                        setVentaType('manual');
+                                                        setSelectedBarberId('');
+                                                        setSelectedClienteId(''); 
+                                                        setIsCreatingClient(false);
+                                                   }}
+                                                   disabled={isEditing && currentId !== null || isSaving}
+                                                   className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 cursor-pointer ${
+                                                        formTipo === 'Gasto' 
+                                                             ? 'bg-red-50 border-red-500 text-red-800' 
+                                                             : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                                                   }`}
+                                              >
+                                                   Gasto (-)
+                                              </button>
+                                         </div>
+                                    </div>
+                                    
+                                    {/* Barbero Asignado */}
+                                    {formTipo === 'Ingreso' && (
+                                         <div className="border-t border-slate-100 pt-4">
+                                             <label className="text-xs font-medium text-slate-600 mb-1 block">
+                                                  Barbero Asignado (Obligatorio)
+                                             </label>
+                                             
+                                             {sortedBarbers.length > 0 ? ( 
+                                                  <select
+                                                       value={selectedBarberId}
+                                                       onChange={(e) => setSelectedBarberId(e.target.value)}
+                                                       className={inputClass + ' cursor-pointer'}
+                                                       disabled={isSaving}
+                                                  >
+                                                       <option value="">-- Selecciona un Barbero --</option>
+                                                       {sortedBarbers.map((e) => ( 
+                                                            <option key={e.id} value={e.id}>
+                                                                 {e.nombre} {e.id === uid && '(Yo)'}
+                                                            </option>
+                                                       ))}
+                                                  </select>
+                                              ) : (
+                                                   <div className="text-xs text-red-500 mt-1 p-2 bg-red-50 rounded">
+                                                        ADVERTENCIA: No hay empleados activos.
+                                                   </div>
+                                               )}
+                                         </div>
+                                    )}
+
+                                    {/* ⭐ NUEVO: Método de Pago (Solo para Ingresos) */}
+                                    {formTipo === 'Ingreso' && (
+                                         <div className="pt-0">
+                                              <label className="text-xs font-medium text-slate-600 mb-1 block">Método de Pago</label>
+                                              <select
+                                                   value={formMetodoPago}
+                                                   onChange={(e) => setFormMetodoPago(e.target.value as PaymentMethod)}
+                                                   className={inputClass + ' cursor-pointer'}
+                                                   disabled={isSaving}
+                                              >
+                                                   <option value="Efectivo">Efectivo</option>
+                                                   <option value="Transferencia">Transferencia</option>
+                                                   <option value="QR/Tarjeta">QR / Tarjeta</option>
+                                              </select>
+                                         </div>
+                                    )}
+                                    {/* ⭐ FIN NUEVO BLOQUE */}
+
+                                    {/* --- SECCIÓN CLIENTE (CON OPCIÓN CREAR RÁPIDO) --- */}
+                                    {formTipo === 'Ingreso' && (
+                                         <div className="border-t border-slate-100 pt-4">
+                                             <div className="flex justify-between items-center mb-1">
+                                                  <label className="text-xs font-medium text-slate-600">
+                                                       Asignar Cliente (Opcional)
+                                                  </label>
+                                                  <button 
+                                                        type="button"
+                                                        onClick={() => setIsCreatingClient(!isCreatingClient)}
+                                                        className="text-[10px] font-bold text-blue-600 hover:underline cursor-pointer"
+                                                        disabled={isSaving}
+                                                  >
+                                                       {isCreatingClient ? "← Seleccionar Existente" : "+ Nuevo Cliente"}
+                                                  </button>
+                                             </div>
+                                             
+                                             {isCreatingClient ? (
+                                                  // MODO CREAR CLIENTE
+                                                  <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 space-y-2 animate-fadeIn">
+                                                       <p className="text-xs font-bold text-blue-700 mb-1">Nuevo Cliente Rápido</p>
+                                                       <input
+                                                             type="text"
+                                                             placeholder="Nombre del Cliente"
+                                                             value={newClientName}
+                                                             onChange={(e) => setNewClientName(e.target.value)}
+                                                             className="w-full px-3 py-1.5 bg-white border border-blue-200 rounded text-sm focus:outline-none focus:border-blue-400"
+                                                             autoFocus
+                                                             disabled={isSaving}
+                                                       />
+                                                       <input
+                                                             type="tel"
+                                                             placeholder="Teléfono (Opcional)"
+                                                             value={newClientPhone}
+                                                             onChange={(e) => setNewClientPhone(e.target.value)}
+                                                             className="w-full px-3 py-1.5 bg-white border border-blue-200 rounded text-sm focus:outline-none focus:border-blue-400"
+                                                             disabled={isSaving}
+                                                       />
+                                                       <p className="text-[10px] text-blue-600 mt-1">
+                                                             * Se creará y se sumará su primera visita.
+                                                       </p>
+                                                  </div>
+                                             ) : (
+                                                  // MODO SELECCIONAR CLIENTE
+                                                  <>
+                                                        {clientes.length > 0 ? (
+                                                             <select
+                                                                  value={selectedClienteId}
+                                                                  onChange={(e) => setSelectedClienteId(e.target.value)}
+                                                                  className={inputClass + ' cursor-pointer border-blue-200 bg-blue-50/30'}
+                                                                  disabled={isSaving}
+                                                             >
+                                                                  <option value="">-- Cliente Anónimo / Sin Cuenta --</option>
+                                                                  {clientes.map((c) => (
+                                                                       <option key={c.id} value={c.id}>
+                                                                            {c.nombre} {c.visitas ? `(${c.visitas} visitas)` : ''}
+                                                                       </option>
+                                                                  ))}
+                                                             </select>
+                                                        ) : (
+                                                             <p className="text-xs text-slate-400 italic mb-2">No tienes clientes registrados aún.</p>
+                                                        )}
+                                                  </>
+                                             )}
+
+                                             {(selectedClienteId || isCreatingClient) && (
+                                                  <p className="text-[10px] text-emerald-600 mt-1 font-semibold flex items-center gap-1">
+                                                        <span>⭐</span> Se sumará 1 turno al historial del cliente.
+                                                  </p>
+                                             )}
+                                         </div>
+                                    )}
+
+                                    {/* Selector de Venta (Servicio vs Manual) */}
+                                    {formTipo === 'Ingreso' && !isEditing && (
+                                         <div className="border-t border-slate-100 pt-4">
+                                             <label className="text-xs font-medium text-slate-600 mb-1 block">Origen del Ingreso</label>
+                                             <div className="flex space-x-4 mb-3">
+                                                  <button 
+                                                       onClick={() => { setVentaType('servicio'); setSelectedServiceId(servicios[0]?.id || ''); }}
+                                                       className={ventaType === 'servicio' ? 'flex-1 py-2 text-sm font-medium rounded-md transition-colors bg-slate-900 text-white shadow' : 'flex-1 py-2 text-sm font-medium rounded-md transition-colors text-slate-500 hover:bg-slate-100'}
+                                                       disabled={servicios.length === 0 || isSaving}
+                                                  >
+                                                       Venta de Servicio
+                                                  </button>
+                                                  <button 
+                                                       onClick={() => { setVentaType('manual'); setSelectedServiceId(''); }}
+                                                       className={ventaType === 'manual' ? 'flex-1 py-2 text-sm font-medium rounded-md transition-colors bg-slate-900 text-white shadow' : 'flex-1 py-2 text-sm font-medium rounded-md transition-colors text-slate-500 hover:bg-slate-100'}
+                                                       disabled={isSaving}
+                                                  >
+                                                       Venta/Ingreso Manual
+                                                  </button>
+                                             </div>
+
+                                             {ventaType === 'servicio' && servicios.length > 0 && (
+                                                  <div>
+                                                       <select
+                                                            value={selectedServiceId}
+                                                            onChange={(e) => setSelectedServiceId(e.target.value)}
+                                                            className={inputClass + ' cursor-pointer'}
+                                                            disabled={isSaving}
+                                                       >
+                                                            <option value="">-- Selecciona un Servicio --</option>
+                                                            {servicios.map((s) => (
+                                                                 <option key={s.id} value={s.id}>
+                                                                      {s.nombre} - {formatCurrency(s.precio)}
+                                                                 </option>
+                                                            ))}
+                                                       </select>
+                                                  </div>
+                                             )}
+                                             {ventaType === 'servicio' && servicios.length === 0 && (
+                                                <p className="text-xs text-red-500 mt-1">No hay servicios registrados. Usa el modo manual.</p>
+                                             )}
+                                         </div>
+                                    )}
+                                    
+                                    {/* Fecha */}
+                                    <div className="border-t border-slate-100 pt-4">
+                                         <label className="text-xs font-medium text-slate-600 mb-1 block">Fecha de Transacción</label>
+                                         <input 
+                                              type="date" 
+                                              value={formDate} 
+                                              onChange={(e) => setFormDate(e.target.value)} 
+                                              className={inputClass + ' cursor-pointer'}
+                                              max={formatDateToInput(new Date())} 
+                                              disabled={isSaving}
+                                         />
+                                    </div>
+
+                                    {/* Monto */}
+                                    {(ventaType === 'manual' || formTipo === 'Gasto') ? (
+                                         <div>
+                                             <label className="text-xs font-medium text-slate-600 mb-1 block">Monto</label>
+                                             <div className="relative">
+                                                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 text-sm">$</span>
+                                                  <input 
+                                                       type="number" 
+                                                       value={formMonto} 
+                                                       onChange={(e) => setFormMonto(e.target.value)} 
+                                                       className={`${inputClass} pl-6 font-medium ${formTipo === 'Ingreso' ? 'text-emerald-700' : 'text-red-700'}`}
+                                                       placeholder="0.00" 
+                                                       min="0"
+                                                       disabled={isSaving}
+                                                  />
+                                             </div>
+                                         </div>
+                                    ) : (
+                                         <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                                             <p className="text-xs text-slate-500">Monto del servicio</p>
+                                             <p className={`font-bold text-lg ${formTipo === 'Ingreso' ? 'text-emerald-700' : 'text-red-700'}`}>
+                                                  {formatCurrency(Number(formMonto || 0))}
+                                             </p>
+                                         </div>
+                                    )}
+
+                                    {/* Descripción */}
+                                    <div>
+                                         <label className="text-xs font-medium text-slate-600 mb-1 block">Descripción</label>
+                                         <textarea 
+                                              rows={2}
+                                              value={formDescripcion} 
+                                              onChange={(e) => setFormDescripcion(e.target.value)} 
+                                              className={inputClass}
+                                              placeholder={formTipo === 'Ingreso' ? "Venta de corte y barba" : "Compra de navajas"} 
+                                              disabled={isSaving}
+                                         />
+                                    </div>
+
+                                    <div className="flex gap-3 pt-2">
+                                         <button 
+                                              onClick={closeModal}
+                                              className={btnSecondary}
+                                              disabled={isSaving}
+                                         >
+                                              Cancelar
+                                         </button>
+                                         <button 
+                                              onClick={handleSave}
+                                              className={btnPrimary}
+                                              disabled={formTipo === 'Ingreso' && !selectedBarberId || isSaving}
+                                         >
+                                              {isSaving ? (
+                                                    <>
+                                                        <IconSpinner color="text-white" />
+                                                        Guardando...
+                                                    </>
+                                               ) : (isEditing ? "Guardar Cambios" : "Registrar Transacción")}
+                                         </button>
+                                    </div>
+                               </div>
+                          </div>
+                     </div>
+                )}
+
+                {/* MODAL ELIMINAR */}
+                {deleteConfirmOpen && transactionToDelete && (
+                     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+                          <div 
+                               ref={deleteModalRef} 
+                               className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 animate-scaleIn space-y-4"
+                               onClick={(e) => e.stopPropagation()}
+                          >
+                               <div className="flex items-center gap-3">
+                                    <div className="p-2 rounded-full bg-red-100 text-red-600">
+                                         <IconAlert />
+                                    </div>
+                                    <h3 className="text-lg font-bold text-slate-900">Confirmar Eliminación</h3>
+                               </div>
+                               
+                               <p className="text-sm text-slate-700">
+                                    ¿Estás seguro de que deseas eliminar esta transacción? Esta acción es irreversible.
+                               </p>
+
+                               <div className="p-3 border border-slate-100 rounded-lg text-sm bg-slate-50">
+                                    <p className="font-semibold">{transactionToDelete.descripcion}</p>
+                                    <p className={`text-xs ${transactionToDelete.tipo === 'Ingreso' ? 'text-emerald-600' : 'text-red-600'}`}>
+                                         {transactionToDelete.tipo}: {formatCurrency(transactionToDelete.monto)}
+                                    </p>
+                                    <p className="text-xs text-slate-400">Fecha: {transactionToDelete.date}</p>
+                                    {transactionToDelete.barberName && (
+                                         <p className="text-xs text-slate-400">Barbero: {transactionToDelete.barberName}</p>
+                                    )}
+                               </div>
+
+                               <div className="flex gap-3 pt-2">
+                                    <button 
+                                         onClick={() => setDeleteConfirmOpen(false)} 
+                                         className={btnSecondary}
+                                         disabled={isDeleting}
+                                    >
+                                         Cancelar
+                                    </button>
+                                    <button 
+                                         onClick={handleDelete} 
+                                         className={btnPrimary.replace('bg-slate-900', 'bg-red-600 hover:bg-red-700')}
+                                         disabled={isDeleting}
+                                    >
+                                         {isDeleting ? (
+                                              <>
+                                                   <IconSpinner color="text-white" />
+                                                   Eliminando...
+                                              </>
+                                         ) : "Sí, Eliminar"}
+                                    </button>
+                               </div>
+                          </div>
+                     </div>
+                )}
+
+            </div>
         </div>
     );
 };

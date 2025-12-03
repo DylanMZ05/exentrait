@@ -12,6 +12,7 @@ import {
     getDoc,
     setDoc,
     Firestore,
+    writeBatch,
 } from "firebase/firestore";
 // IMPORTANTE: Importamos funciones para manejar la sesión aislada
 import { 
@@ -31,6 +32,7 @@ import { barberDb, barberAuth, firebaseConfig } from "../services/firebaseBarber
 // CONSTANTE GLOBAL: Contraseña Maestra Fija
 // ==========================================================
 const DEFAULT_MASTER_PASSWORD = "Admin1234";
+const DEFAULT_PRIORITY = 999; // Prioridad por defecto para documentos antiguos
 
 // Tipados (Simplificados)
 interface Empleado {
@@ -42,6 +44,7 @@ interface Empleado {
     authUid?: string; 
     internalEmail?: string; 
     username?: string;
+    prioridad: number; 
 }
 
 interface BarberConfig {
@@ -84,6 +87,24 @@ const IconSpinner = () => (
     <div className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white"></div>
 );
 
+const IconArrowUp = () => (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+    </svg>
+);
+
+const IconArrowDown = () => (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+    </svg>
+);
+
+const IconList = () => (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7" />
+    </svg>
+);
+
 // --- Helpers de Formato ---
 const slugify = (text: string) => {
     return text
@@ -118,6 +139,168 @@ const ensureOwnerDocumentExists = async (db: Firestore, uid: string) => {
 
 
 /* ============================================================
+    COMPONENTES ANIDADOS
+============================================================ */
+interface ReorderModalProps {
+    employees: Empleado[];
+    uid: string;
+    onClose: () => void;
+    onSaveSuccess: () => Promise<void>;
+    setErrorMessage: (msg: string | null) => void;
+    isSaving: boolean;
+    setIsSaving: (isSaving: boolean) => void;
+    btnPrimary: string;
+    btnSecondary: string;
+}
+
+const ReorderEmpleadosModal: React.FC<ReorderModalProps> = ({ 
+    employees, 
+    uid, 
+    onClose, 
+    onSaveSuccess, 
+    setErrorMessage, 
+    isSaving, 
+    setIsSaving,
+    btnPrimary,
+    btnSecondary
+}) => {
+    // Solo mostramos y reordenamos a los empleados activos
+    const initialActiveEmployees = employees
+        .filter(emp => emp.activo)
+        .sort((a, b) => a.prioridad - b.prioridad);
+
+    const [reorderedList, setReorderedList] = useState<Empleado[]>(initialActiveEmployees);
+    
+    // Función para mover un empleado en la lista local
+    const handleReorder = useCallback((index: number, direction: 'up' | 'down') => {
+        setReorderedList(prevList => {
+            const newList = [...prevList];
+            const newIndex = direction === 'up' ? index - 1 : index + 1;
+            
+            if (newIndex >= 0 && newIndex < newList.length) {
+                // Intercambio de posiciones en el array
+                [newList[index], newList[newIndex]] = [newList[newIndex], newList[index]];
+                return newList;
+            }
+            return prevList;
+        });
+    }, []);
+
+    // Función para guardar el nuevo orden en Firestore
+    const saveNewOrder = async () => {
+        if (!uid || isSaving) return;
+        setIsSaving(true);
+        setErrorMessage(null);
+
+        try {
+            const batch = writeBatch(barberDb);
+            
+            // Asignar nuevas prioridades basadas en el índice del array (1, 2, 3...)
+            reorderedList.forEach((empleado, index) => {
+                const newPriority = index + 1;
+                
+                // Solo actualizamos si la prioridad realmente ha cambiado
+                if (empleado.prioridad !== newPriority) {
+                    const docRef = doc(barberDb, `barber_users/${uid}/empleados/${empleado.id}`);
+                    batch.update(docRef, { 
+                        prioridad: newPriority, 
+                        updatedAt: serverTimestamp() 
+                    });
+                }
+            });
+
+            await batch.commit();
+            await onSaveSuccess();
+            onClose();
+
+        } catch (err) {
+            console.error("Error al guardar nuevo orden:", err);
+            setErrorMessage("Error al guardar el nuevo orden de prioridad.");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl w-full max-w-lg p-6 shadow-xl animate-fadeIn">
+                <h3 className="text-xl font-semibold text-slate-900 mb-2 flex items-center gap-2">
+                    <IconList />
+                    Ordenar Empleados
+                </h3>
+                <p className="text-sm text-slate-500 mb-6">
+                    Define el orden en que aparecerán los empleados activos en los menús desplegables de registro de ventas (1 es el primero).
+                </p>
+
+                {/* Lista de Empleados Reordenables */}
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 max-h-80 overflow-y-auto space-y-2">
+                    {reorderedList.length === 0 ? (
+                        <p className="text-sm text-slate-400 text-center py-4">No hay empleados activos para ordenar.</p>
+                    ) : (
+                        reorderedList.map((emp, index) => (
+                            <div 
+                                key={emp.id} 
+                                className="flex items-center justify-between bg-white p-3 rounded-md shadow-sm border border-slate-100"
+                            >
+                                <div className="flex items-center gap-3">
+                                    <span className="font-bold text-slate-800 w-5 text-center">{index + 1}.</span>
+                                    <span className="text-sm text-slate-700">{emp.nombre}</span>
+                                </div>
+                                <div className="flex gap-2">
+                                    {/* Botón Subir */}
+                                    <button 
+                                        onClick={() => handleReorder(index, 'up')}
+                                        disabled={index === 0 || isSaving}
+                                        className="p-1 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                                        title="Mover arriba"
+                                    >
+                                        <IconArrowUp />
+                                    </button>
+                                    {/* Botón Bajar */}
+                                    <button 
+                                        onClick={() => handleReorder(index, 'down')}
+                                        disabled={index === reorderedList.length - 1 || isSaving}
+                                        className="p-1 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                                        title="Mover abajo"
+                                    >
+                                        <IconArrowDown />
+                                    </button>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+
+                <div className="flex gap-3 pt-6">
+                    <button 
+                        type="button"
+                        onClick={onClose}
+                        className={btnSecondary}
+                        disabled={isSaving}
+                    >
+                        Cancelar
+                    </button>
+                    <button 
+                        type="button"
+                        onClick={saveNewOrder}
+                        className={btnPrimary}
+                        disabled={isSaving || reorderedList.length === 0}
+                    >
+                        {isSaving ? (
+                            <>
+                                <IconSpinner />
+                                Guardando Orden...
+                            </>
+                        ) : "Guardar Nuevo Orden"}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+
+/* ============================================================
     COMPONENTE PRINCIPAL
 ============================================================ */
 export const Empleados: React.FC = () => {
@@ -134,16 +317,19 @@ export const Empleados: React.FC = () => {
     const [isEditing, setIsEditing] = useState(false);
     const [selectedEmpleado, setSelectedEmpleado] = useState<Empleado | null>(null);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    // ⭐ NUEVO ESTADO PARA EL MODAL DE ORDENACIÓN
+    const [reorderModalOpen, setReorderModalOpen] = useState(false);
     
-    // ⭐ Estado para controlar bloqueo de UI durante guardado/eliminación
+    // ⭐ Estado para controlar bloqueo de UI durante guardado/eliminación/movimiento
     const [isSaving, setIsSaving] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
-
+    
     // Estados del formulario
     const [formNombre, setFormNombre] = useState("");
     const [formPorcentaje, setFormPorcentaje] = useState(0);
     const [formActivo, setFormActivo] = useState(true);
     const [formDni, setFormDni] = useState(""); 
+    const [formPrioridad, setFormPrioridad] = useState(DEFAULT_PRIORITY); 
 
     // Mensajes
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -157,7 +343,7 @@ export const Empleados: React.FC = () => {
         setErrorMessage(null);
 
         try {
-            // 1. Cargar Configuración (para obtener Master Password y Slug)
+            // 1. Cargar Configuración
             const configRef = doc(barberDb, `barber_config/${uid}`);
             const configSnap = await getDoc(configRef);
             if (configSnap.exists()) {
@@ -166,20 +352,63 @@ export const Empleados: React.FC = () => {
                 setConfig(null); 
             }
 
-            // 2. Cargar Lista de Empleados
-            const q = query(collection(barberDb, `barber_users/${uid}/empleados`), orderBy("nombre", "asc"));
+            // 2. Cargar Lista de Empleados (por nombre, y luego migrar/ordenar en frontend)
+            const empleadosRef = collection(barberDb, `barber_users/${uid}/empleados`);
+            const q = query(empleadosRef, orderBy("nombre", "asc"));
             const snap = await getDocs(q);
+            
             const list: Empleado[] = [];
-            snap.forEach((d) => list.push({ id: d.id, ...d.data() } as Empleado));
+            const batch = writeBatch(barberDb);
+            let needsMigration = false;
+
+            // Revisión de documentos y preparación de migración
+            snap.forEach((d) => {
+                const data = d.data();
+                // Si falta el campo 'prioridad', lo marcamos para migración en Firestore
+                if (data.prioridad === undefined) {
+                    needsMigration = true;
+                    // Preparamos la actualización para darle una prioridad por defecto
+                    batch.update(d.ref, {
+                        prioridad: DEFAULT_PRIORITY,
+                        updatedAt: serverTimestamp()
+                    });
+                }
+            });
+
+            // Si hay documentos sin prioridad, ejecutamos la migración automática
+            if (needsMigration) {
+                console.log(`Migrando ${batch._mutations.length} documentos sin prioridad...`);
+                await batch.commit();
+                // Forzamos una recarga para leer los datos migrados
+                return loadData(); 
+            }
+
+            // Construcción y Ordenación de la lista (después de asegurar que todos tienen prioridad)
+            snap.forEach((d) => {
+                const data = d.data();
+                list.push({ 
+                    id: d.id, 
+                    prioridad: data.prioridad === undefined ? DEFAULT_PRIORITY : data.prioridad, 
+                    ...data 
+                } as Empleado);
+            });
+
+            // ⭐ Ordenamos la lista en el Frontend por prioridad, ya que Firestore necesita índice para el orden
+            list.sort((a, b) => {
+                if (a.prioridad < b.prioridad) return -1;
+                if (a.prioridad > b.prioridad) return 1;
+                return a.nombre.localeCompare(b.nombre);
+            });
 
             setEmpleados(list);
+            
         } catch (err) {
             console.error(err);
             setErrorMessage("Error al cargar empleados.");
         } finally {
             setLoading(false);
         }
-    }, [uid]);
+    }, [uid]); 
 
     useEffect(() => {
         if (uid) loadData();
@@ -194,6 +423,7 @@ export const Empleados: React.FC = () => {
         setFormActivo(true);
         setSelectedEmpleado(null);
         setFormDni(""); 
+        setFormPrioridad(DEFAULT_PRIORITY); 
         setErrorMessage(null);
     };
 
@@ -205,9 +435,15 @@ export const Empleados: React.FC = () => {
             setFormPorcentaje(empleado.porcentaje);
             setFormActivo(empleado.activo);
             setFormDni(empleado.dni); 
+            setFormPrioridad(empleado.prioridad);
         } else {
             setIsEditing(false);
             resetForm();
+            // Nueva prioridad: la prioridad más baja + 1
+            const maxPriority = empleados.length > 0 
+                ? Math.max(...empleados.map(e => e.prioridad)) 
+                : 0;
+            setFormPrioridad(maxPriority + 1);
         }
         setModalOpen(true);
     };
@@ -215,7 +451,7 @@ export const Empleados: React.FC = () => {
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         
-        if (isSaving) return; // Prevenir doble clic
+        if (isSaving) return; 
 
         if (!uid || !config || config.masterPassword !== DEFAULT_MASTER_PASSWORD) {
             setErrorMessage(`Debe configurar el Nombre de la Barbería en Configuración.`);
@@ -226,19 +462,22 @@ export const Empleados: React.FC = () => {
             return;
         }
         if (!formDni.trim() || formDni.trim().length < 6) {
-             setErrorMessage("El DNI es obligatorio y debe tener al menos 6 dígitos.");
-             return;
+            setErrorMessage("El DNI es obligatorio y debe tener al menos 6 dígitos.");
+            return;
+        }
+        if (formPrioridad < 1) { 
+            setErrorMessage("La prioridad debe ser un número positivo (1 o más).");
+            return;
         }
         
-        // Validación de DNI único
         const dniToCheck = formDni.trim();
         if (empleados.some(emp => emp.dni === dniToCheck && emp.id !== selectedEmpleado?.id)) {
-             setErrorMessage("El DNI ingresado ya está registrado por otro empleado.");
-             return;
+            setErrorMessage("El DNI ingresado ya está registrado por otro empleado.");
+            return;
         }
 
         setErrorMessage(null);
-        setIsSaving(true); // ⭐ BLOQUEA el botón
+        setIsSaving(true); 
         const barberSlug = slugify(config.barberName);
         
         try {
@@ -252,6 +491,7 @@ export const Empleados: React.FC = () => {
                 porcentaje: Number(formPorcentaje),
                 activo: formActivo,
                 dni: newEmployeeDni, 
+                prioridad: Number(formPrioridad), 
                 updatedAt: serverTimestamp(),
                 role: "employee", 
             };
@@ -266,32 +506,24 @@ export const Empleados: React.FC = () => {
                 
                 let empleadoId = "";
                 
-                // A) Inicializar App Secundaria
                 const secondaryApp = initializeApp(firebaseConfig, "SecondaryApp");
                 const secondaryAuth = getAuth(secondaryApp);
 
                 try {
-                    // B) CRÍTICO: Forzar persistencia EN MEMORIA.
                     await setPersistence(secondaryAuth, inMemoryPersistence);
-
-                    // C) Crear usuario en la instancia aislada
                     const authCred = await createUserWithEmailAndPassword(secondaryAuth, internalEmail, DEFAULT_MASTER_PASSWORD);
                     empleadoId = authCred.user.uid;
-                    
-                    // D) Logout explícito por seguridad
                     await signOut(secondaryAuth);
                 } catch (authErr: any) {
                     console.error("Error Auth Secundaria:", authErr);
                     if (authErr.code === "auth/email-already-in-use") {
-                         throw new Error("Ya existe un empleado con ese email interno. Intenta variar el nombre.");
+                        throw new Error("Ya existe un empleado con ese email interno. Intenta variar el nombre.");
                     }
                     throw authErr;
                 } finally {
-                    // E) IMPORTANTE: Eliminar la app secundaria para liberar memoria
                     await deleteApp(secondaryApp);
                 }
 
-                // F) Guardar en la DB principal (barberDb) usando el ID generado
                 if (empleadoId) {
                     await setDoc(doc(barberDb, `barber_users/${uid}/empleados/${empleadoId}`), {
                         ...baseData,
@@ -311,14 +543,14 @@ export const Empleados: React.FC = () => {
             if (typeof err === 'object' && err.message) message = err.message;
             setErrorMessage(message);
         } finally {
-            setIsSaving(false); // ⭐ DESBLOQUEA el botón
+            setIsSaving(false); 
         }
     };
     
     const handleDelete = async () => {
-        if (!uid || !selectedEmpleado || isDeleting) return; // Prevenir doble clic
+        if (!uid || !selectedEmpleado || isDeleting) return; 
         
-        setIsDeleting(true); // ⭐ BLOQUEA el botón
+        setIsDeleting(true); 
         
         try {
             await deleteDoc(doc(barberDb, `barber_users/${uid}/empleados/${selectedEmpleado.id}`));
@@ -329,40 +561,54 @@ export const Empleados: React.FC = () => {
             console.error("Error al eliminar:", err);
             setErrorMessage("Error al eliminar empleado.");
         } finally {
-            setIsDeleting(false); // ⭐ DESBLOQUEA el botón
+            setIsDeleting(false); 
         }
     };
+
 
     /* ============================================================
     RENDER
     ============================================================ */
     const inputClass = "w-full px-4 py-2.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-slate-800 focus:border-transparent outline-none transition-all text-sm";
-    // Modificamos btnPrimary y btnSecondary para reflejar el estado de carga
     const btnPrimary = "w-full py-2.5 bg-slate-900 text-white rounded-lg hover:bg-slate-800 active:scale-[0.98] transition font-medium text-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2";
     const btnSecondary = "w-full py-2.5 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 active:scale-[0.98] transition font-medium text-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed";
+    const btnTertiary = "py-2.5 px-4 bg-slate-50 border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-100 active:scale-[0.98] transition font-medium text-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2";
+
 
     return (
         <div className="space-y-6 animate-fadeIn m-2 pb-16">
             
             {/* HEADER */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-                <div>
+                <div className="flex flex-col">
                     <h2 className="text-xl font-semibold text-slate-900 flex items-center gap-2">
                         <IconUser />
                         Gestión de Empleados
                     </h2>
                     <p className="text-sm text-slate-500">
-                        {empleados.length} empleados registrados.
+                        {empleados.length} empleados registrados. La prioridad define el orden en las ventas.
                     </p>
                 </div>
 
-                <button 
-                    onClick={() => openModal()}
-                    className="flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-sm active:scale-95 whitespace-nowrap cursor-pointer"
-                >
-                    <IconAdd />
-                    Nuevo Empleado
-                </button>
+                <div className="flex gap-3">
+                    {/* ⭐ NUEVO BOTÓN PARA ORDENAR */}
+                    <button 
+                        onClick={() => setReorderModalOpen(true)}
+                        className={btnTertiary}
+                        disabled={loading || !empleados.some(e => e.activo)}
+                    >
+                        <IconList />
+                        Ordenar Empleados
+                    </button>
+
+                    <button 
+                        onClick={() => openModal()}
+                        className="flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-sm active:scale-95 whitespace-nowrap cursor-pointer"
+                    >
+                        <IconAdd />
+                        Nuevo Empleado
+                    </button>
+                </div>
             </div>
             
             {errorMessage && <div className="text-sm text-red-600 bg-red-50 p-3 rounded-lg border border-red-200">{errorMessage}</div>}
@@ -403,6 +649,7 @@ export const Empleados: React.FC = () => {
                         <table className="min-w-full divide-y divide-slate-200">
                             <thead className="bg-slate-50">
                                 <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Prioridad</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Nombre</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">DNI / Login</th> 
                                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Comisión</th>
@@ -413,6 +660,11 @@ export const Empleados: React.FC = () => {
                             <tbody className="divide-y divide-slate-100">
                                 {empleados.map((emp) => (
                                     <tr key={emp.id} className="hover:bg-slate-50 transition-colors">
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
+                                            <span className={`font-semibold ${emp.prioridad === DEFAULT_PRIORITY ? 'text-orange-500' : 'text-slate-900'}`}>
+                                                {emp.prioridad === DEFAULT_PRIORITY ? 'N/A' : emp.prioridad}
+                                            </span>
+                                        </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">{emp.nombre}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 font-mono">
                                             <code className="bg-slate-100 px-1 rounded text-xs select-all">
@@ -497,18 +749,33 @@ export const Empleados: React.FC = () => {
                                 </p>
                             </div>
 
-                            {/* Porcentaje de Comisión */}
-                            <div>
-                                <label className="text-xs font-medium text-slate-600 mb-1 block">Porcentaje de Comisión (%)</label>
-                                <input 
-                                    type="number" 
-                                    value={formPorcentaje} 
-                                    onChange={(e) => setFormPorcentaje(Number(e.target.value))} 
-                                    className={inputClass}
-                                    min="0"
-                                    max="100"
-                                    disabled={isSaving}
-                                />
+                            <div className="grid grid-cols-2 gap-4">
+                                {/* Porcentaje de Comisión */}
+                                <div>
+                                    <label className="text-xs font-medium text-slate-600 mb-1 block">Porcentaje de Comisión (%)</label>
+                                    <input 
+                                        type="number" 
+                                        value={formPorcentaje} 
+                                        onChange={(e) => setFormPorcentaje(Number(e.target.value))} 
+                                        className={inputClass}
+                                        min="0"
+                                        max="100"
+                                        disabled={isSaving}
+                                    />
+                                </div>
+                                {/* ⭐ Prioridad */}
+                                <div>
+                                    <label className="text-xs font-medium text-slate-600 mb-1 block">Prioridad (1 es el primero)</label>
+                                    <input 
+                                        type="number" 
+                                        value={formPrioridad} 
+                                        onChange={(e) => setFormPrioridad(Number(e.target.value))} 
+                                        className={inputClass}
+                                        min="1"
+                                        required
+                                        disabled={isSaving}
+                                    />
+                                </div>
                             </div>
                             
                             {/* Estado */}
@@ -536,7 +803,7 @@ export const Empleados: React.FC = () => {
                                 <button 
                                     type="submit"
                                     className={btnPrimary}
-                                    disabled={isSaving} // ⭐ Bloquea el botón al guardar
+                                    disabled={isSaving} 
                                 >
                                     {isSaving ? (
                                         <>
@@ -574,7 +841,7 @@ export const Empleados: React.FC = () => {
                             <button 
                                 onClick={handleDelete}
                                 className={`w-full py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 active:scale-[0.98] transition font-medium text-sm cursor-pointer flex items-center justify-center gap-2`}
-                                disabled={isDeleting} // ⭐ Bloquea el botón al eliminar
+                                disabled={isDeleting} 
                             >
                                 {isDeleting ? (
                                     <>
@@ -586,6 +853,21 @@ export const Empleados: React.FC = () => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* ⭐ MODAL DE REORDENACIÓN DE EMPLEADOS */}
+            {reorderModalOpen && (
+                <ReorderEmpleadosModal
+                    employees={empleados}
+                    uid={uid!}
+                    onClose={() => setReorderModalOpen(false)}
+                    onSaveSuccess={loadData}
+                    setErrorMessage={setErrorMessage}
+                    isSaving={isSaving}
+                    setIsSaving={setIsSaving}
+                    btnPrimary={btnPrimary}
+                    btnSecondary={btnSecondary}
+                />
             )}
 
         </div>

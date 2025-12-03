@@ -1,4 +1,8 @@
-# Logs
+# Archivo .gitignore
+
+# ------------------------------------------------------------------
+# 1. LOGS
+# ------------------------------------------------------------------
 logs
 *.log
 npm-debug.log*
@@ -7,22 +11,52 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# Dependencias
+# ------------------------------------------------------------------
+# 2. DEPENDENCIAS
+# ------------------------------------------------------------------
 node_modules
 
-# Builds
+# ------------------------------------------------------------------
+# 3. BUILDS
+# ------------------------------------------------------------------
 dist
 dist-ssr
 *.local
+# Ignorar archivos locales generados por Electron/Builds
+*.exe
+*.dmg
+*.AppImage
+*.blockmap
+latest.yml
+builder-debug.yml
+builder-effective-config.yaml
 
-# Evitar backend completo
+# ------------------------------------------------------------------
+# 4. EXCLUSIONES DE BACKEND (Firebase Functions y Secrets)
+# ------------------------------------------------------------------
+# Ignorar la carpeta de Firebase Functions
+/functions
+# Ignorar archivos de configuración de Firebase CLI / Debug
+.firebase/
+.firebaserc
+firebase-debug.log
+firebase-debug.*.log
+# Ignorar el archivo de configuración de Firebase con posibles secrets
+# (Ajusta la ruta si 'firebase.ts' no está en src/services/)
+src/services/firebase.ts 
+src/barber-manager/services/firebase.ts # Ruta común en proyectos React
 backend/
 backend/*
 
-# Archivos de producción de Electron (instaladores y updates)
+# ------------------------------------------------------------------
+# 5. ARCHIVOS DE PRODUCCIÓN DE ELECTRON
+# ------------------------------------------------------------------
 public/updates/*
 !public/updates/.gitkeep
 
+# ------------------------------------------------------------------
+# 6. ARCHIVOS DE SISTEMA Y CONFIGURACIÓN DE EDITORES
+# --------------------------------------------------
 # Archivos del sistema
 .DS_Store
 Thumbs.db
@@ -37,22 +71,17 @@ Thumbs.db
 *.sln
 *.sw?
 
-# Archivos de entorno
+# ------------------------------------------------------------------
+# 7. ARCHIVOS DE ENTORNO Y SECRETS
+# ------------------------------------------------------------------
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
 
-# Coverage / tests
+# ------------------------------------------------------------------
+# 8. COVERAGE / TESTS
+# ------------------------------------------------------------------
 coverage
 *.lcov
-
-# Archivos generados por Electron Builder
-*.exe
-*.dmg
-*.AppImage
-*.blockmap
-latest.yml
-builder-debug.yml
-builder-effective-config.yaml
