@@ -12,7 +12,7 @@ export default function Footer() {
   };
 
   return (
-    <footer className="bg-[#0b0c1a] text-white py-12 px-6 shadow-2xl mt-8">
+    <footer className="bg-[#0b0c1a] text-white py-12 px-6 shadow-2xl">
       <div className="container mx-auto grid grid-cols-1 md:grid-cols-4 gap-8">
         
         {/* Columna 1: Logo y Branding */}

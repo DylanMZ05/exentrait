@@ -1,4 +1,3 @@
-// src/barber-manager/pages/Empleados.tsx
 import React, { useEffect, useState, useCallback } from "react";
 import {
     collection,
@@ -360,6 +359,7 @@ export const Empleados: React.FC = () => {
             const list: Empleado[] = [];
             const batch = writeBatch(barberDb);
             let needsMigration = false;
+            let migratedCount = 0; // ⭐ Contador manual para evitar el error TS2339
 
             // Revisión de documentos y preparación de migración
             snap.forEach((d) => {
@@ -367,6 +367,7 @@ export const Empleados: React.FC = () => {
                 // Si falta el campo 'prioridad', lo marcamos para migración en Firestore
                 if (data.prioridad === undefined) {
                     needsMigration = true;
+                    migratedCount++; // ⭐ Contar la mutación
                     // Preparamos la actualización para darle una prioridad por defecto
                     batch.update(d.ref, {
                         prioridad: DEFAULT_PRIORITY,
@@ -377,7 +378,8 @@ export const Empleados: React.FC = () => {
 
             // Si hay documentos sin prioridad, ejecutamos la migración automática
             if (needsMigration) {
-                console.log(`Migrando ${batch._mutations.length} documentos sin prioridad...`);
+                // ⭐ CORRECCIÓN TS2339: Usamos el contador manual en el console.log
+                console.log(`Migrando ${migratedCount} documentos sin prioridad...`);
                 await batch.commit();
                 // Forzamos una recarga para leer los datos migrados
                 return loadData(); 

@@ -5,14 +5,16 @@ import {
   useLocation,
 } from "react-router-dom";
 
-// IMPORTACIONES CORREGIDAS: Aseguramos la resolución añadiendo la extensión .tsx
+
 import Login from "./pages/ClienteView/Login.tsx";
 import ClienteView from "./pages/ClienteView/ClienteView.tsx";
-import Home from "./pages/Home/Home.tsx";
 import Updates from "./pages/Updates/Updates.tsx";
+import HomeWrapper from "./pages/Home/HomeWrapper.tsx";
 
 import Header from "./components/Header.tsx";
 import Footer from "./components/Footer.tsx";
+
+import LandingGym from "./pages/Gym/LandingGym.tsx";
 
 // Módulo Barber Manager
 import { BarberApp } from "./barber-manager/BarberApp.tsx";
@@ -34,7 +36,9 @@ function AppContent() {
       <main className="flex-1">
         <Routes>
           {/* ---- APP PRINCIPAL ---- */}
-          <Route path="/" element={<Home />} />
+          <Route path="/" element={<HomeWrapper />} />
+
+          <Route path="/gym-landing/" element={<LandingGym />} />
           <Route path="/gym-manager/" element={<Login />} />
           <Route path="/cliente/:dni" element={<ClienteView />} />
           <Route path="/gym-manager/updates" element={<Updates />} />

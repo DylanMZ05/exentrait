@@ -1,5 +1,309 @@
 @import "tailwindcss";
 
-.shadow-dmz {
-  box-shadow: rgba(0, 0, 0, 0.15) 0px 2px 8px;
+/* Variables de Color/Estilo */
+:root {
+    --tech-cyan: #0ff; 
+    --subtle-gray: #e0e0e0;
+    --font-size: 8vw; 
+}
+
+/* =========================
+  1. Contenedor Global y Fondo (60% Pantalla)
+  =========================
+*/
+.intro-container {
+    width: 100vw;
+    height: 80vh; /* 60vh */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden; 
+    
+    /* Fondo completo negro: CORREGIDO */
+    background-color: #0d0d0d; 
+    
+    color: var(--subtle-gray); 
+    font-family: 'Inter', sans-serif;
+    position: relative; 
+}
+
+/* 🖥️ Fondo de Textura Sutil */
+.subtle-bg-texture {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: 
+        radial-gradient(circle at center, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    background-size: 10px 10px;
+    opacity: 0.5;
+    z-index: 1; /* Debajo del canvas */
+    pointer-events: none;
+}
+
+/* ESTILO CLAVE DE CANVAS: Fondo TECH (Cubre el 100% del contenedor) */
+.particle-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%; /* Asegura cobertura completa */
+    height: 100%; /* Asegura cobertura completa */
+    z-index: 2; 
+    pointer-events: none; 
+}
+
+/* Contenedor para asegurar que H1 y H2 estén centrados y encima de todo */
+.logo-content-wrapper {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 15; 
+}
+
+/* Desactivamos las antiguas partículas (ya no se usan) */
+.particle-swarm-ingress, .particle-swarm-burst {
+    display: none; 
+}
+
+
+/* CAMBIO: Selector para H1 */
+.logo-text-container {
+    display: flex;
+    align-items: center;
+    position: relative;
+    font-size: var(--font-size); 
+    font-weight: 300;
+    letter-spacing: 0.02em;
+    transition: all 0.5s ease-in-out; 
+}
+
+/* Adaptación para móviles */
+@media (max-width: 768px) {
+    .logo-text-container {
+        font-size: 12vw; 
+    }
+}
+
+/* 🖼️ Contenedor para la 'X' */
+.x-char-area {
+    position: relative;
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    height: 1.2em;
+    margin: 0 0.05em;
+}
+
+/* ESTADO INICIAL GLOBAL */
+.logo-text-container.phase-initial {
+    transform: translateX(0); 
+    filter: blur(10px);
+    opacity: 0;
+}
+
+/* 💥 Fase X-CENTERED: La X está en el centro. */
+.logo-text-container.phase-x-centered {
+    transform: translateX(calc(-1.7em * var(--font-size) / 8)); 
+    filter: blur(0); 
+    opacity: 1;
+}
+
+
+/* 🚀 Fase TEXT-REVEAL: La X se mueve a su posición final. */
+.logo-text-container.phase-text-reveal {
+    transform: translateX(0); 
+    filter: blur(0);
+    opacity: 1;
+    transition: transform 0.5s ease-out; 
+}
+
+/* Fase DONE: Estado estático final */
+.logo-text-container.phase-done {
+    transform: translateX(0); 
+    filter: blur(0);
+    opacity: 1;
+}
+
+/* =========================
+  2. ESTILOS DE LETRAS y GLOW
+  =========================
+*/
+.logo-char {
+    opacity: 0;
+    transform: scale(0.8);
+    transition: all 0.3s ease-out; 
+    color: currentColor; 
+}
+
+/* Letras de Neón (X y IT) */
+.x-char, .it-char {
+    color: var(--tech-cyan);
+    text-shadow: 0 0 5px var(--tech-cyan); 
+}
+
+/* X es más grande (1.5x) */
+.x-char {
+    font-size: 1.5em; 
+    line-height: 1;
+    transform-origin: center;
+}
+
+/* X-char: Parpadeo y Pulso */
+
+.phase-x-centered .x-char {
+    /* Aplicamos parpadeo intermitente antes de la revelación final */
+    animation: 
+        x-glitch-flicker 1.4s steps(1) forwards, 
+        x-pulse-glow 1.5s ease-in-out infinite alternate 1.5s; 
+    opacity: 0; /* Inicialmente oculto para el parpadeo */
+    transform: scale(1);
+}
+
+/* Asegura la visibilidad y el pulso de la X en las fases posteriores. */
+.phase-text-reveal .x-char,
+.phase-done .x-char {
+    animation: x-pulse-glow 1.5s ease-in-out infinite alternate;
+    opacity: 1; /* La X se queda visible */
+    transform: scale(1);
+}
+
+/* Animación de Parpadeo / Lámpara que le cuesta encender */
+@keyframes x-glitch-flicker {
+    0% { opacity: 0; filter: blur(5px); text-shadow: none; }
+    10% { opacity: 0.1; filter: blur(2px); text-shadow: none; }
+    20% { opacity: 0; }
+    30% { opacity: 0.8; filter: blur(0); text-shadow: 0 0 10px var(--tech-cyan); }
+    40% { opacity: 0; }
+    50% { opacity: 1; filter: blur(0); text-shadow: 0 0 5px var(--tech-cyan); }
+    60% { opacity: 0.1; filter: blur(1px); text-shadow: none; }
+    70% { opacity: 1; filter: blur(0); text-shadow: 0 0 5px var(--tech-cyan); }
+    80% { opacity: 0.5; }
+    90% { opacity: 1; }
+    100% { opacity: 1; text-shadow: 0 0 5px var(--tech-cyan); } /* Asegura el estado final visible */
+}
+
+/* Pulso de glow suave en la X */
+@keyframes x-pulse-glow {
+    0% { text-shadow: 0 0 5px var(--tech-cyan), 0 0 10px rgba(0, 255, 255, 0.3); }
+    100% { text-shadow: 0 0 10px var(--tech-cyan), 0 0 20px rgba(0, 255, 255, 0.6); }
+}
+
+
+/* 🚀 Fase TEXT-REVEAL: El resto del texto aparece secuencialmente (efecto tecleo) */
+.phase-text-reveal .regular-char, 
+.phase-text-reveal .it-char {
+    /* La animación char-appear simula el "tecleo" */
+    animation-name: char-appear;
+    animation-duration: 0.2s; 
+    animation-fill-mode: forwards;
+}
+
+/* Animación de tecleo: Desplazamiento y Opacidad */
+@keyframes char-appear {
+    0% { 
+        opacity: 0; 
+        transform: translateY(10px) scale(0.8); 
+        filter: blur(2px); 
+    }
+    100% { 
+        opacity: 1; 
+        transform: translateY(0) scale(1); 
+        filter: blur(0); 
+    }
+}
+
+/* El texto restante se queda visible en la fase DONE */
+.phase-done .regular-char, 
+.phase-done .it-char {
+    opacity: 1;
+    transform: scale(1);
+    animation: none;
+}
+
+
+/* Estilo del superíndice IT */
+.it-char {
+    font-size: 0.35em;
+    font-weight: 500;
+    vertical-align: super;
+    margin-left: 0.2em; 
+}
+
+
+/* =========================================
+  3. ANIMACIÓN FUTURISTA: PATRÓN DE REVELACIÓN (PATTERN REVEAL)
+  =========================================
+*/
+.pattern-reveal {
+    position: relative;
+    display: inline-block;
+    overflow: visible; 
+    line-height: 1;
+}
+
+/* Ocultar la X dentro de su contenedor de revelación inicialmente */
+.phase-initial .x-char {
+    opacity: 0;
+}
+
+/* El patrón de revelación se activa en la fase centralizada */
+.phase-x-centered .pattern-reveal::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+    /* Fondo del patrón diagonal que oculta la X */
+    background: repeating-linear-gradient(
+        -45deg, 
+        #0d0d0d 0, 
+        #0d0d0d 15px, 
+        rgba(0, 255, 255, 0.1) 15px, 
+        rgba(0, 255, 255, 0.1) 16px
+    );
+    background-size: 40px 40px;
+    
+    /* Animación del Patrón: se desliza de izquierda a derecha (dura 0.7s, empieza en 0.5s) */
+    animation: pattern-slide-reveal 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards 0.5s;
+}
+
+/* El patrón desaparece para no recortar el glow de la X */
+.phase-text-reveal .pattern-reveal::before,
+.phase-done .pattern-reveal::before {
+    display: none; 
+}
+
+/* La X se muestra justo después de que el patrón se desliza (después de 1.2s en total) */
+.phase-x-centered .pattern-reveal > .x-char {
+    opacity: 1;
+    transition: opacity 0.1s 1.2s; 
+}
+
+
+@keyframes pattern-slide-reveal {
+    0% {
+        opacity: .1;
+    }
+    100% {
+        opacity: 0; 
+    }
+}
+
+
+
+.scroll-hidden {
+    opacity: 0; 
+    transform: translateY(2rem); 
+    transition: opacity 0.8s ease-out, transform 0.8s ease-out; /* ⬅️ TRANSICIÓN AQUÍ */
+}
+
+.scroll-visible {
+    opacity: 1;
+    transform: translateY(0); 
 }

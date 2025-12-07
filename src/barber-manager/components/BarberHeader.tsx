@@ -50,9 +50,9 @@ const calculateDaysRemaining = (data: BarberUserData): number | null => {
             venceDate = new Date(flatTimestamp.seconds * 1000);
             // console.log(`[DEBUG: CALCULO] Tipo: Objeto Plano. Reconstruido: ${venceDate.toLocaleDateString()}`);
         } else if (value instanceof Date) {
-             venceDate = value;
+             venceDate = value;
         } else {
-             venceDate = new Date(value);
+             venceDate = new Date(value);
         }
     } catch (e) {
         console.error("[DEBUG: CALCULO] ERROR en la conversión de fecha. Valor crudo:", value, e);
@@ -207,7 +207,7 @@ export const BarberHeader: React.FC = () => {
                 // Llamar siempre con el UID actual logueado. 
                 fetchSubscriptionStatus(currentUser.uid);
             } else {
-                 // Si no hay usuario, limpiar estados
+                 // Si no hay usuario, limpiar estados
                 setDaysRemaining(null);
                 setIsLoadingData(false);
             }
@@ -261,10 +261,10 @@ export const BarberHeader: React.FC = () => {
     const reportRoutes = [
         { name: "Ventas", path: "/barber-manager/ventas", icon: IconSales, allowed: true },
         { name: "Stock", path: "/barber-manager/stock", icon: IconStock, allowed: true },
-        // 🛑 RUTA CORREGIDA: SOLO /admin-super
+        // 🛑 RUTA Panel Administrador: SOLO para Super Admin
         { name: "Panel Administrador", path: "/admin-super", icon: IconSuperAdmin, allowed: IS_SUPER_ADMIN }, 
-        // Configuración (Solo para Dueño normal, no para el SA)
-        { name: "Configuración", path: "/barber-manager/configuracion", icon: IconSettings, allowed: isOwnerMode && !IS_SUPER_ADMIN },
+        // 🔑 MODIFICACIÓN: Configuración: Ahora permitida si es Dueño NORMAL o Super Admin
+        { name: "Configuración", path: "/barber-manager/configuracion", icon: IconSettings, allowed: isOwnerMode }, // isOwnerMode ya cubre Dueño Normal y Super Admin
     ];
 
     const toggleMenu = () => setMenuOpen((prev) => !prev);
@@ -413,6 +413,7 @@ export const BarberHeader: React.FC = () => {
                                 {reportRoutes.some(r => r.allowed) && (
                                     <>
                                         <div className="border-t border-slate-700 my-1"></div>
+                                        
                                         {/* Botón de Panel SA */}
                                         {reportRoutes.filter(r => r.name === "Panel Administrador" && r.allowed).map(route => (
                                             <button key={route.name} onClick={() => goTo(route.path)} className="cursor-pointer w-full px-4 py-2 flex items-center gap-2 text-left text-blue-300 hover:bg-blue-900/40 transition-colors">
@@ -420,7 +421,7 @@ export const BarberHeader: React.FC = () => {
                                             </button>
                                         ))}
 
-                                        {/* Botón de Configuración Normal */}
+                                        {/* Botón de Configuración Normal (Ahora visible para SA) */}
                                         {reportRoutes.filter(r => r.name === "Configuración" && r.allowed).map(route => (
                                             <button key={route.name} onClick={() => goTo(route.path)} className="cursor-pointer w-full px-4 py-2 flex items-center gap-2 text-left hover:bg-slate-800 transition-colors">
                                                 <IconBox><route.icon /></IconBox> {route.name}

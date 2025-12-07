@@ -63,7 +63,7 @@ type DeleteTarget =
   | null;
 
 /* ────────────────────────────────────────────────────────────────────────────
-   Constantes
+   Constantes
 ──────────────────────────────────────────────────────────────────────────── */
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 const cacheKey = (dni: string) => `cliente:${dni}`;
@@ -76,7 +76,7 @@ const CATALOGO_URLS = [
 ];
 
 /* ────────────────────────────────────────────────────────────────────────────
-   Componente
+   Componente
 ──────────────────────────────────────────────────────────────────────────── */
 const ClienteView: React.FC = () => {
   const { dni: dniParam } = useParams<{ dni: string }>();
@@ -91,6 +91,9 @@ const ClienteView: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [openDay, setOpenDay] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Estado para el Modo Edición
+  const [isEditing, setIsEditing] = useState(false);
 
   // Edición de pesos y series
   const [draftPesos, setDraftPesos] = useState<Record<string, string[]>>({});
@@ -380,6 +383,9 @@ const ClienteView: React.FC = () => {
     setOpenDay(null);
     setDraftPesos({});
     setDraftSeries({});
+    
+    // Desactivar modo edición al recargar cliente
+    setIsEditing(false);
 
     try {
       if (!dniFromUrl) {
@@ -1110,7 +1116,7 @@ const ClienteView: React.FC = () => {
   };
 
   return (
-    <div className="bg-gray-100 min-h-screen flex justify-center p-2 sm:p-4">
+    <div className="bg-gray-100 min-h-screen flex justify-center p-2 pt-25 sm:p-4">
       <div className="w-full max-w-md">
         {/* Encabezado */}
         <header className="bg-[#0f1c3f] text-white rounded-t-lg shadow p-4">
@@ -1147,14 +1153,33 @@ const ClienteView: React.FC = () => {
             <h2 className="font-semibold text-gray-700 text-sm sm:text-base">
               Rutina
             </h2>
+            
+            {/* Botón de Modo Edición / Salir Modo Edición */}
             <button
               type="button"
-              onClick={handleAddDay}
-              className="px-3 py-1.5 rounded-full text-xs sm:text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm"
+              onClick={() => setIsEditing(!isEditing)}
+              className={`px-3 py-1.5 rounded-full text-xs sm:text-sm font-medium transition shadow-sm ${
+                isEditing
+                  ? "bg-red-500 text-white hover:bg-red-600"
+                  : "bg-indigo-600 text-white hover:bg-indigo-700"
+              }`}
             >
-              + Agregar nuevo día
+              {isEditing ? "Salir Modo Edición" : "Modo Edición"}
             </button>
           </div>
+
+            {/* Botón "+ Agregar nuevo día" (Solo en modo Edición) */}
+            {isEditing && (
+                <div className="flex items-center justify-end mb-3">
+                    <button
+                        type="button"
+                        onClick={handleAddDay}
+                        className="px-3 py-1.5 rounded-full text-xs sm:text-sm font-medium bg-green-600 text-white hover:bg-green-700 shadow-sm"
+                    >
+                        + Agregar nuevo día
+                    </button>
+                </div>
+            )}
 
           {errorMsg && (
             <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
@@ -1204,6 +1229,8 @@ const ClienteView: React.FC = () => {
                           )}
                         </span>
 
+                        {/* Botones Mover/Eliminar Día (solo en modo edición) */}
+                        {isEditing && (
                         <div className="flex items-center gap-1">
                           {/* Botones mover día */}
                           <button
@@ -1239,19 +1266,24 @@ const ClienteView: React.FC = () => {
                             Eliminar
                           </button>
                         </div>
+                        )}
+                        {/* Input Nombre Día (solo en modo edición) / Texto */}
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            className="w-full rounded border border-gray-300 px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                            placeholder="Nombre del día (ej: Full body, Piernas, Push...)"
+                            value={nombreExtra}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) =>
+                              handleNombreDiaChange(clave, e.target.value)
+                            }
+                          />
+                        ) : nombreExtra ? (
+                            <p className="text-xs text-gray-700 mt-1 pl-1 italic font-normal">{nombreExtra}</p>
+                        ) : null}
                       </div>
 
-                      {/* Nombre del día editable */}
-                      <input
-                        type="text"
-                        className="w-full rounded border border-gray-300 px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                        placeholder="Nombre del día (ej: Full body, Piernas, Push...)"
-                        value={nombreExtra}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) =>
-                          handleNombreDiaChange(clave, e.target.value)
-                        }
-                      />
                     </div>
 
                     <span
@@ -1288,7 +1320,18 @@ const ClienteView: React.FC = () => {
                         )}
 
                       {rutinaDia && Array.isArray(rutinaDia.ejercicios) && (
-                        <div className="space-y-2">
+                        <div className="space-y-3">
+                            {/* Etiquetas Series y Peso (solo si no estamos editando) */}
+                            {!isEditing && rutinaDia.ejercicios.length > 0 && (
+                                <div className="hidden sm:grid grid-cols-12 gap-2 text-gray-500 text-[10px] font-medium uppercase mb-1 border-b border-gray-300 pb-1">
+                                    {/* Ajuste de columnas para que coincida con el modo de visualización */}
+                                    <div className="sm:col-span-1"></div> 
+                                    <div className="sm:col-span-7 pl-1">Ejercicio</div>
+                                    <div className="sm:col-span-2 text-center">Series</div>
+                                    <div className="sm:col-span-2 text-right pr-1">Peso</div>
+                                </div>
+                            )}
+
                           {rutinaDia.ejercicios.map((ej, origIndex) => {
                             const nombreEj = ej?.ejercicio ?? "";
                             const pesoValue =
@@ -1302,131 +1345,154 @@ const ClienteView: React.FC = () => {
                                 ? findExerciseId(nombreEj)
                                 : null;
 
+                            // Clase base para el contenedor principal de cada ejercicio
+                            // En modo edición usaremos un div sin grid para el ejercicio, y un grid para los controles
+                            
                             return (
                               <div
                                 key={`${clave}-${origIndex}`}
-                                className="grid grid-cols-12 gap-2 items-start border-b border-gray-200 pb-2 last:border-b-0"
+                                className={`border-b border-gray-200 pb-3 last:border-b-0 ${isEditing ? 'space-y-1' : 'grid grid-cols-12 gap-2 items-start'}`}
                               >
-                                {/* Reordenar ejercicio */}
-                                <div className="col-span-12 flex justify-between items-center sm:col-span-1 sm:flex-col sm:justify-start sm:items-start gap-1">
-                                  <div className="flex sm:flex-col gap-1">
-                                    <button
-                                      type="button"
-                                      className="text-[11px] px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-700"
-                                      onClick={() =>
-                                        handleMoveExercise(
-                                          clave,
-                                          origIndex,
-                                          "up"
-                                        )
-                                      }
-                                    >
-                                      ↑
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="text-[11px] px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-700"
-                                      onClick={() =>
-                                        handleMoveExercise(
-                                          clave,
-                                          origIndex,
-                                          "down"
-                                        )
-                                      }
-                                    >
-                                      ↓
-                                    </button>
-                                  </div>
-                                </div>
+                                {isEditing ? (
+                                    /* ────────── MODO EDICIÓN ────────── */
+                                    <div className="flex flex-col gap-1">
+                                        <label className="text-[10px] font-medium text-gray-500 uppercase">Ejercicio</label>
+                                        <input
+                                            type="text"
+                                            className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                            placeholder="Nombre del ejercicio"
+                                            value={nombreEj}
+                                            onChange={(e) =>
+                                                handleEjercicioNombreChange(
+                                                    clave,
+                                                    origIndex,
+                                                    e.target.value
+                                                )
+                                            }
+                                        />
+                                        {/* Fila Series + Peso + Botones */}
+                                        <div className="grid grid-cols-12 gap-2 mt-1">
+                                            {/* Series */}
+                                            <div className="col-span-4 flex flex-col gap-1">
+                                                <label className="text-[10px] font-medium text-gray-500 uppercase">Series</label>
+                                                <input
+                                                    type="text"
+                                                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs text-center bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                                    placeholder="Series"
+                                                    value={seriesValue}
+                                                    onChange={(e) =>
+                                                        handleSeriesChange(
+                                                            clave,
+                                                            origIndex,
+                                                            e.target.value
+                                                        )
+                                                    }
+                                                />
+                                            </div>
+                                            {/* Peso */}
+                                            <div className="col-span-4 flex flex-col gap-1">
+                                                <label className="text-[10px] font-medium text-gray-500 uppercase">Peso</label>
+                                                <input
+                                                    type="text"
+                                                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs text-center bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                                    placeholder="Peso"
+                                                    value={pesoValue}
+                                                    onChange={(e) =>
+                                                        handlePesoChange(
+                                                            clave,
+                                                            origIndex,
+                                                            e.target.value
+                                                        )
+                                                    }
+                                                />
+                                            </div>
+                                            {/* Controles: Mover/Eliminar */}
+                                            <div className="col-span-4 flex items-end justify-end gap-1">
+                                                <button
+                                                    type="button"
+                                                    className="text-[10px] px-4 rounded bg-gray-200 hover:bg-gray-300 text-gray-700 leading-none h-full"
+                                                    onClick={() => handleMoveExercise(clave, origIndex, "up")}
+                                                >
+                                                    ↑
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="text-[10px] px-4 rounded bg-gray-200 hover:bg-gray-300 text-gray-700 leading-none h-full"
+                                                    onClick={() => handleMoveExercise(clave, origIndex, "down")}
+                                                >
+                                                    ↓
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="text-red-600 hover:text-red-700 text-[10px] p-1 border border-red-200 rounded leading-none h-full"
+                                                    onClick={() => requestDeleteExercise(clave, origIndex)}
+                                                >
+                                                    Eliminar
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    /* ────────── MODO VISUALIZACIÓN ────────── */
+                                    <>
+                                        {/* Columna de Movimiento (oculta en visualización) */}
+                                        <div className="sm:col-span-1 hidden sm:block"></div> 
 
-                                {/* Ejercicio */}
-                                <div className="col-span-12 sm:col-span-5 flex flex-col gap-1">
-                                  <input
-                                    type="text"
-                                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                                    placeholder="Nombre del ejercicio"
-                                    value={nombreEj}
-                                    onChange={(e) =>
-                                      handleEjercicioNombreChange(
-                                        clave,
-                                        origIndex,
-                                        e.target.value
-                                      )
-                                    }
-                                  />
-                                  {ejId && nombreEj.trim() !== "" && (
-                                    <button
-                                      type="button"
-                                      className="self-start text-[11px] text-indigo-600 hover:text-indigo-700 underline decoration-dotted"
-                                      onClick={() => setModalEjId(ejId)}
-                                    >
-                                      Ver técnica / imagen
-                                    </button>
-                                  )}
-                                </div>
+                                        {/* Ejercicio */}
+                                        <div className="col-span-12 sm:col-span-7 flex flex-col gap-1">
+                                            <p className="font-semibold text-sm text-gray-800 break-words pt-1.5">
+                                                {nombreEj}
+                                            </p>
+                                            {ejId && nombreEj.trim() !== "" && (
+                                                <button
+                                                    type="button"
+                                                    className="self-start text-[11px] text-indigo-600 hover:text-indigo-700 underline decoration-dotted"
+                                                    onClick={() => setModalEjId(ejId)}
+                                                >
+                                                    Ver técnica / imagen
+                                                </button>
+                                            )}
+                                        </div>
 
-                                {/* Series */}
-                                <div className="col-span-6 sm:col-span-3 flex flex-col gap-1">
-                                  <input
-                                    type="text"
-                                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs text-center bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                                    placeholder="Series"
-                                    value={seriesValue}
-                                    onChange={(e) =>
-                                      handleSeriesChange(
-                                        clave,
-                                        origIndex,
-                                        e.target.value
-                                      )
-                                    }
-                                  />
-                                </div>
+                                        {/* Series */}
+                                        <div className="col-span-6 sm:col-span-2 flex flex-col items-center">
+                                            <p className="font-semibold text-sm text-gray-800 break-words mt-1.5 sm:mt-0">
+                                                {seriesValue || <span className="text-gray-400">-</span>}
+                                            </p>
+                                            {/* Etiqueta debajo solo en móvil para visualización */}
+                                            <p className="sm:hidden text-[10px] text-gray-500 font-medium mt-0.5">Series</p>
+                                        </div>
 
-                                {/* Peso */}
-                                <div className="col-span-6 sm:col-span-3 flex flex-col gap-1">
-                                  <input
-                                    type="text"
-                                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs text-right bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                                    placeholder="Peso"
-                                    value={pesoValue}
-                                    onChange={(e) =>
-                                      handlePesoChange(
-                                        clave,
-                                        origIndex,
-                                        e.target.value
-                                      )
-                                    }
-                                  />
-                                </div>
-
-                                {/* Eliminar ejercicio */}
-                                <div className="col-span-12 flex justify-end mt-1">
-                                  <button
-                                    type="button"
-                                    className="text-[11px] text-red-600 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50"
-                                    onClick={() =>
-                                      requestDeleteExercise(clave, origIndex)
-                                    }
-                                  >
-                                    Eliminar ejercicio
-                                  </button>
-                                </div>
+                                        {/* Peso */}
+                                        <div className="col-span-6 sm:col-span-2 flex flex-col items-end">
+                                            <p className="font-semibold text-sm text-gray-800 break-words mt-1.5 sm:mt-0">
+                                                {pesoValue || <span className="text-gray-400">-</span>}
+                                            </p>
+                                            {/* Etiqueta debajo solo en móvil para visualización */}
+                                            <p className="sm:hidden text-[10px] text-gray-500 font-medium mt-0.5">Peso</p>
+                                        </div>
+                                        
+                                    </>
+                                )}
                               </div>
                             );
                           })}
                         </div>
                       )}
 
-                      {/* Botón agregar ejercicio */}
-                      <div className="mt-3">
-                        <button
-                          type="button"
-                          className="w-full text-xs font-medium px-3 py-2 rounded border border-dashed border-indigo-400 text-indigo-600 hover:bg-indigo-50"
-                          onClick={() => handleAddExercise(clave)}
-                        >
-                          + Agregar ejercicio
-                        </button>
-                      </div>
+                      
+                        {/* Botón Agregar Ejercicio (solo en modo edición) */}
+                        {isEditing && (
+                          <div className="mt-3">
+                            <button
+                              type="button"
+                              className="w-full text-xs font-medium px-3 py-2 rounded border border-dashed border-indigo-400 text-indigo-600 hover:bg-indigo-50"
+                              onClick={() => handleAddExercise(clave)}
+                            >
+                              + Agregar ejercicio
+                            </button>
+                          </div>
+                        )}
                     </div>
                   </div>
                 </div>
@@ -1435,8 +1501,8 @@ const ClienteView: React.FC = () => {
 
             {orderedKeys.length === 0 && (
               <p className="text-xs text-gray-500 text-center py-4">
-                Todavía no tenés días cargados en tu rutina. Podés crear uno con
-                el botón <span className="font-semibold">“Agregar nuevo día”</span>.
+                Todavía no tenés días cargados en tu rutina. Podés crear uno al
+                activar el <span className="font-semibold">“Modo Edición”</span>.
               </p>
             )}
           </div>

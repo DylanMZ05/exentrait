@@ -1,5 +1,5 @@
 // src/barber-manager/pages/Clientes.tsx
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
     collection,
     addDoc,
@@ -23,16 +23,6 @@ import { barberDb } from "../services/firebaseBarber";
 
 const formatCurrency = (amount: number) => {
     return `$ ${Math.abs(amount).toLocaleString("es-AR", { minimumFractionDigits: 0 })}`;
-};
-
-const formatPhoneNumber = (phone: string | undefined): string => {
-    if (!phone) return 'N/A';
-    const cleaned = ('' + phone).replace(/\D/g, '');
-    const match = cleaned.match(/^(\d{3})(\d{3})(\d{4})$/);
-    if (match) {
-        return `(${match[1]}) ${match[2]}-${match[3]}`;
-    }
-    return phone;
 };
 
 

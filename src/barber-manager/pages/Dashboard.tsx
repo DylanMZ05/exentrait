@@ -11,8 +11,7 @@ import {
     updateDoc,
     addDoc,
     increment,
-    serverTimestamp, 
-    writeBatch,
+    serverTimestamp
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { useNavigate } from "react-router-dom"; 

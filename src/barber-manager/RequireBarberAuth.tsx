@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { onAuthStateChanged, type User } from "firebase/auth";
-import { barberAuth } from "./services/firebaseBarber"; 
+import { barberAuth } from "./services/firebaseBarber";
 
 interface Props {
     children?: React.ReactNode;

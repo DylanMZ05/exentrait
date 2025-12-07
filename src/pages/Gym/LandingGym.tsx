@@ -10,7 +10,7 @@ const INSTALLER_WIN = encodeURI(
   "/updates/Exentra-Gym-Setup-1.0.29-x64.exe"
 );
 
-export default function Home() {
+export default function LandingGym() {
   // Si más adelante subís video a YouTube, pegá el embed aquí:
   // const VIDEO_URL = ""; // por ej.: "https://www.youtube.com/embed/xxxxxxxx"
 
