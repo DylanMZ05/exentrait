@@ -15,10 +15,7 @@ const WHATSAPP_URL_WITH_MESSAGE = `https://wa.me/${WHATSAPP_NUMBER}?text=${ENCOD
 
 
 // --- Lógica del Canvas para Partículas 3D (Starfield Effect) ---
-
-/**
-* Clase para representar un punto con posición 3D (X, Y, Z) y velocidad.
-*/
+// (Clase StarParticle y funciones animateCanvas/initializeParticles omitidas para brevedad, asumiendo que ya existen en el archivo original)
 class StarParticle {
     x: number;
     y: number;
@@ -100,16 +97,13 @@ const animateCanvas = (canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D)
     animationFrameId = requestAnimationFrame(() => animateCanvas(canvas, ctx));
 };
 
+
 // --- FUNCIÓN DE SCROLL SUAVE CORREGIDA ---
 const scrollToElement = (id: string) => {
     // Aseguramos que el ID no tenga el '#' para usarlo con document.getElementById
     const element = document.getElementById(id.replace('#', ''));
     if (element) {
-        // Para llevarlo 50px más abajo de la posición actual (-100px de offset), 
-        // cambiamos el offset a -50px.
-        // POSICIÓN ACTUAL = PosiciónAbsoluta - 100
-        // NUEVA POSICIÓN = PosiciónAbsoluta - 50
-        const yOffset = 0; // Compensación de 50px por encima del borde superior del elemento
+        const yOffset = 0; 
         const yPosition = element.getBoundingClientRect().top + window.pageYOffset + yOffset;
 
         window.scrollTo({
@@ -124,7 +118,12 @@ const scrollToElement = (id: string) => {
 const FirstSection: React.FC = () => {
     const [phase, setPhase] = useState<AnimationPhase>('initial');
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    
+    // 🎯 NUEVO: Estado y Referencia para la Animación de Scroll de la Sección
+    const [isSectionVisible, setIsSectionVisible] = useState(false);
+    const sectionRef = useRef<HTMLElement>(null);
 
+    // Lógica de Animación Inicial (Logo)
     useEffect(() => {
         const timer1 = setTimeout(() => { setPhase('x-centered'); }, 100); 
         const timer2 = setTimeout(() => { setPhase('text-reveal'); }, 1500); 
@@ -163,9 +162,41 @@ const FirstSection: React.FC = () => {
             window.removeEventListener('resize', handleResize);
         };
     }, []);
+    
+    // 🎯 NUEVO: Lógica del IntersectionObserver para la Sección
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                // Activar la visibilidad cuando la sección entre al viewport
+                if (entry.isIntersecting) {
+                    setIsSectionVisible(true);
+                    // Desconectar una vez que se activa
+                    observer.unobserve(entry.target);
+                }
+            },
+            {
+                root: null,
+                rootMargin: '0px',
+                threshold: 0.15, // Se activa cuando el 15% de la sección es visible
+            }
+        );
+
+        const currentElement = sectionRef.current;
+
+        if (currentElement) {
+            observer.observe(currentElement);
+        }
+
+        return () => {
+            if (currentElement) {
+                observer.unobserve(currentElement);
+            }
+        };
+    }, []);
+    // --------------------------------------------------------------------
+
 
     const revealDelay = (index: number) => {
-        // Necesita casting porque React infiere `style` como React.CSSProperties, pero acepta string.
         return `${index * 0.15}s`; 
     };
 
@@ -183,7 +214,7 @@ const FirstSection: React.FC = () => {
                 {/* ⭐ CAPA DE FONDO OSCURO (para difuminar antes de que aparezca el logo) */}
                 <div className={`
                     absolute inset-0 
-                    bg-black/70 
+                    bg-black/40 
                     z-[5] 
                     transition-opacity duration-500 ease-in-out
                     ${phase === 'initial' ? 'opacity-0' : 'opacity-100'}
@@ -259,10 +290,19 @@ const FirstSection: React.FC = () => {
                 </div>
             </main>
             
-            {/* 🎯 SECCIÓN DE PRODUCTOS PROPIOS: Plataformas de Gestión    */}
-            <section className={`
-                relative -mt-16 z-20 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8
-            `}>
+            {/* 🎯 SECCIÓN DE PRODUCTOS PROPIOS: Plataformas de Gestión MODIFICADA */}
+            <section 
+                className={`
+                    relative -mt-16 z-20 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8
+                    // --- CLASES DE ANIMACIÓN APLICADAS ---
+                    transition-all duration-700 ease-out delay-200 // Duración y retardo de la transición
+                    ${isSectionVisible 
+                        ? 'opacity-100 translate-y-0' 
+                        : 'opacity-0 translate-y-8' // Estado inicial fuera del viewport
+                    }
+                `}
+                ref={sectionRef} // 🎯 ASIGNAMOS LA REFERENCIA
+            >
                 <div className="bg-white border border-gray-300/50 overflow-hidden p-8 md:p-12 text-center">
                     
                     {/* Contenedor de imágenes de los Softwares */}
@@ -271,7 +311,7 @@ const FirstSection: React.FC = () => {
                         {/* Imagen del Software 1: Pesa (Gimnasio) */}
                         <div className="flex flex-col items-center">
                             <img 
-                                src="src/assets/pesa.webp" 
+                                src="assets/pesa.webp" 
                                 alt="Icono de una pesa, representando software de gestión para gimnasios" 
                                 className="w-16 h-16 sm:w-20 sm:h-20 object-contain drop-shadow-lg"
                             />
@@ -284,7 +324,7 @@ const FirstSection: React.FC = () => {
                         {/* Imagen del Software 2: Barber (Barbería) */}
                         <div className="flex flex-col items-center">
                             <img 
-                                src="src/assets/barber.webp" 
+                                src="assets/barber.webp" 
                                 alt="Icono de tijeras, representando software de gestión para barberías" 
                                 className="w-16 h-16 sm:w-20 sm:h-20 object-contain drop-shadow-lg"
                             />

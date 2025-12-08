@@ -101,7 +101,7 @@ const KeyCommitments: React.FC = () => {
                          className={`${card1Visibility} ${transitionClasses} p-6`}>
                         {/* IMAGEN 1: Interfaz */}
                         <img 
-                            src="src/assets/interfaz.webp" 
+                            src="assets/interfaz.webp" 
                             alt="Diseño de interfaz de usuario" 
                             className="w-16 h-16 mb-4 mx-auto object-contain"
                         />
@@ -116,7 +116,7 @@ const KeyCommitments: React.FC = () => {
                          className={`${card2Visibility} ${transitionClasses} p-6`}>
                         {/* IMAGEN 2: Veloz */}
                         <img 
-                            src="src/assets/veloz.webp" 
+                            src="assets/veloz.webp" 
                             alt="Icono de velocidad y agilidad" 
                             className="w-16 h-16 mb-4 mx-auto object-contain"
                         />
@@ -131,7 +131,7 @@ const KeyCommitments: React.FC = () => {
                         className={`${card3Visibility} ${transitionClasses} p-6`}>
                         {/* IMAGEN 3: Apoyo Técnico */}
                         <img 
-                            src="src/assets/apoyo-tecnico.webp" 
+                            src="assets/apoyo-tecnico.webp" 
                             alt="Icono de apoyo técnico o soporte" 
                             className="w-16 h-16 mb-4 mx-auto object-contain"
                         />

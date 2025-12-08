@@ -482,7 +482,7 @@ export const Login: React.FC = () => {
             {/* Flecha ahora apuntando hacia la derecha y con texto */}
             <Link 
                 to={HOMEPAGE_PATH} 
-                className="absolute top-4 left-4 p-2 rounded-full bg-white/80 shadow-md hover:bg-white transition-colors flex items-center space-x-2"
+                className="absolute top-4 left-4 p-2 px-3 rounded-full bg-white/80 shadow-md hover:bg-white transition-colors flex items-center space-x-2"
                 title="Volver a la página principal"
             >
                 {/* 1. Imagen rotada 180 grados */}

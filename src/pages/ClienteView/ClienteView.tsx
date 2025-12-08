@@ -14,6 +14,12 @@ import {
   collection,
   deleteDoc,
 } from "firebase/firestore";
+import { Link } from "react-router-dom";
+
+import flechaImg from "../../assets/flecha.png";
+
+const HOMEPAGE_PATH = "/";
+
 
 /* ────────────────────────────────────────────────────────────────────────────
   Tipos
@@ -383,7 +389,7 @@ const ClienteView: React.FC = () => {
     setOpenDay(null);
     setDraftPesos({});
     setDraftSeries({});
-    
+    
     // Desactivar modo edición al recargar cliente
     setIsEditing(false);
 
@@ -1116,111 +1122,129 @@ const ClienteView: React.FC = () => {
   };
 
   return (
-    <div className="bg-gray-100 min-h-screen flex justify-center p-2 pt-25 sm:p-4">
-      <div className="w-full max-w-md">
-        {/* Encabezado */}
-        <header className="bg-[#0f1c3f] text-white rounded-t-lg shadow p-4">
-          <div className="flex flex-col gap-2 text-sm">
-            <div className="flex justify-between items-center">
-              <h1 className="font-bold text-lg">
-                {cliente.nombre?.toUpperCase()}
-              </h1>
-              <span>{cliente.dias?.length || 0} veces x semana</span>
-            </div>
-            <div className="flex justify-between items-center">
-              {vencida ? (
-                <span className={badgeClass}>CUOTA VENCIDA</span>
-              ) : (
-                <span className="font-semibold">
-                  Días restantes:{" "}
-                  <span
-                    className={`${diasPillClass} inline-flex items-center justify-center min-w-[2.25rem] px-2 py-0.5 rounded-full text-[13px]`}
-                    title={badgeText}
-                  >
-                    {diasRestantes}
-                  </span>
-                </span>
-              )}
-
-              <span>{(cliente.dias || []).join(" - ")}</span>
-            </div>
-          </div>
-        </header>
-
-        {/* Rutina */}
-        <div className="bg-white shadow rounded-b-lg p-4">
-          <div className="flex items-center justify-between mb-3 gap-2">
-            <h2 className="font-semibold text-gray-700 text-sm sm:text-base">
-              Rutina
-            </h2>
-            
-            {/* Botón de Modo Edición / Salir Modo Edición */}
-            <button
-              type="button"
-              onClick={() => setIsEditing(!isEditing)}
-              className={`px-3 py-1.5 rounded-full text-xs sm:text-sm font-medium transition shadow-sm ${
-                isEditing
-                  ? "bg-red-500 text-white hover:bg-red-600"
-                  : "bg-indigo-600 text-white hover:bg-indigo-700"
-              }`}
-            >
-              {isEditing ? "Salir Modo Edición" : "Modo Edición"}
-            </button>
-          </div>
-
-            {/* Botón "+ Agregar nuevo día" (Solo en modo Edición) */}
-            {isEditing && (
-                <div className="flex items-center justify-end mb-3">
-                    <button
-                        type="button"
-                        onClick={handleAddDay}
-                        className="px-3 py-1.5 rounded-full text-xs sm:text-sm font-medium bg-green-600 text-white hover:bg-green-700 shadow-sm"
+    <>
+      <Link 
+          to={HOMEPAGE_PATH} 
+          className="absolute top-4 left-4 p-2 px-3 rounded-full bg-white/80 shadow-md hover:bg-white transition-colors flex items-center space-x-2"
+          title="Volver a la página principal"
+      >
+          {/* 1. Imagen rotada 180 grados */}
+          <img 
+              src={flechaImg} 
+              alt="Página Principal" 
+              className="w-5 h-5" 
+          />
+          {/* 2. Texto "Página Principal" */}
+          <span className="text-sm font-medium text-gray-700 hidden sm:inline">
+              Página Principal
+          </span>
+      </Link>
+      <div className="bg-gray-100 min-h-screen flex flex-col items-center justify-center p-2 sm:p-4"> 
+        <div className="w-full max-w-md">
+          {/* Encabezado */}
+          <header className="bg-[#0f1c3f] text-white rounded-t-lg shadow p-4">
+            <div className="flex flex-col gap-2 text-sm">
+              <div className="flex justify-between items-center">
+                <h1 className="font-bold text-lg">
+                  {cliente.nombre?.toUpperCase()}
+                </h1>
+                <span>{cliente.dias?.length || 0} veces x semana</span>
+              </div>
+              <div className="flex justify-between items-center">
+                {vencida ? (
+                  <span className={badgeClass}>CUOTA VENCIDA</span>
+                ) : (
+                  <span className="font-semibold">
+                    Días restantes:{" "}
+                    <span
+                      className={`${diasPillClass} inline-flex items-center justify-center min-w-[2.25rem] px-2 py-0.5 rounded-full text-[13px]`}
+                      title={badgeText}
                     >
-                        + Agregar nuevo día
-                    </button>
-                </div>
+                      {diasRestantes}
+                    </span>
+                  </span>
+                )}
+
+                <span>{(cliente.dias || []).join(" - ")}</span>
+              </div>
+            </div>
+          </header>
+
+          {/* Rutina */}
+          <div className="bg-white shadow rounded-b-lg p-4">
+            <div className="flex items-center justify-between mb-3 gap-2">
+              <h2 className="font-semibold text-gray-700 text-sm sm:text-base">
+                Rutina
+              </h2>
+              
+              {/* Botón de Modo Edición / Salir Modo Edición */}
+              <button
+                type="button"
+                onClick={() => setIsEditing(!isEditing)}
+                className={`px-3 py-1.5 rounded-full text-xs sm:text-sm font-medium transition shadow-sm ${
+                  isEditing
+                    ? "bg-red-500 text-white hover:bg-red-600"
+                    : "bg-indigo-600 text-white hover:bg-indigo-700"
+                }`}
+              >
+                {isEditing ? "Salir Modo Edición" : "Modo Edición"}
+              </button>
+            </div>
+
+          	{/* Botón "+ Agregar nuevo día" (Solo en modo Edición) */}
+          	{isEditing && (
+          		<div className="flex items-center justify-end mb-3">
+          			<button
+          				type="button"
+          				onClick={handleAddDay}
+          				className="px-3 py-1.5 rounded-full text-xs sm:text-sm font-medium bg-green-600 text-white hover:bg-green-700 shadow-sm"
+          			>
+          				+ Agregar nuevo día
+          			</button>
+          		</div>
+          	)}
+
+            {errorMsg && (
+              <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+                {errorMsg}
+              </div>
+            )}
+            {saveMsg && (
+              <div className="mb-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded px-3 py-2">
+                {saveMsg}
+              </div>
             )}
 
-          {errorMsg && (
-            <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
-              {errorMsg}
-            </div>
-          )}
-          {saveMsg && (
-            <div className="mb-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded px-3 py-2">
-              {saveMsg}
-            </div>
-          )}
+            <div className="flex flex-col gap-2">
+              {orderedKeys.map((clave, idx) => {
+                const rutinaDia = cliente.rutina?.[clave];
+                const nombreExtra = rutinaDia?.nombreDia || "";
+                const diaLabel = `Día ${idx + 1}`;
+                const isOpen = openDay === clave;
+                const contentHeight = heights[clave] ?? 0;
 
-          <div className="flex flex-col gap-2">
-            {orderedKeys.map((clave, idx) => {
-              const rutinaDia = cliente.rutina?.[clave];
-              const nombreExtra = rutinaDia?.nombreDia || "";
-              const diaLabel = `Día ${idx + 1}`;
-              const isOpen = openDay === clave;
-              const contentHeight = heights[clave] ?? 0;
-
-              return (
-                <div
-                  key={clave}
-                  className="bg-gray-100 rounded shadow-sm overflow-hidden"
-                >
-                  {/* Header del día */}
+                return (
                   <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => onToggleDay(clave)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ")
-                        onToggleDay(clave);
-                    }}
-                    className="w-full flex items-center justify-between px-4 py-3 font-medium cursor-pointer bg-gray-100"
-                    aria-expanded={isOpen}
-                    aria-controls={`panel-${clave}`}
+                    key={clave}
+                    className="bg-gray-100 rounded shadow-sm overflow-hidden"
                   >
-                    <div className="flex flex-col items-start gap-1 w-full">
+                    {/* Header del día */}
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => onToggleDay(clave)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ")
+                          onToggleDay(clave);
+                      }}
+                      className="w-full flex flex-col px-4 py-3 font-medium cursor-pointer bg-gray-100" // Cambiado a flex-col para el input debajo
+                      aria-expanded={isOpen}
+                      aria-controls={`panel-${clave}`}
+                    >
+                      {/* Fila principal: Nombre del Día + Botones de Edición (Horizontal) */}
                       <div className="flex items-center justify-between w-full gap-2">
-                        <span className="font-semibold text-sm text-gray-900">
+                        {/* Nombre del día / Título */}
+                        <span className="font-semibold text-sm text-gray-900 flex-grow">
                           {diaLabel}
                           {nombreExtra && (
                             <span className="text-xs text-gray-600 ml-1">
@@ -1231,440 +1255,445 @@ const ClienteView: React.FC = () => {
 
                         {/* Botones Mover/Eliminar Día (solo en modo edición) */}
                         {isEditing && (
-                        <div className="flex items-center gap-1">
-                          {/* Botones mover día */}
-                          <button
-                            type="button"
-                            className="text-[11px] px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-700"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleMoveDay(clave, "up");
-                            }}
+                          <div
+                            className="flex items-center gap-1 shrink-0"
+                            onClick={(e) => e.stopPropagation()} // Detener propagación para no cerrar el acordeón
                           >
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            className="text-[11px] px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-700"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleMoveDay(clave, "down");
-                            }}
-                          >
-                            ↓
-                          </button>
+                            {/* Botones mover día */}
+                            <button
+                              type="button"
+                              className="text-[11px] px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-700 disabled:opacity-50"
+                              onClick={() => handleMoveDay(clave, "up")}
+                              disabled={idx === 0}
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              className="text-[11px] px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-700 disabled:opacity-50"
+                              onClick={() => handleMoveDay(clave, "down")}
+                              disabled={idx === orderedKeys.length - 1}
+                            >
+                              ↓
+                            </button>
 
-                          {/* Eliminar día */}
-                          <button
-                            type="button"
-                            className="text-[11px] text-red-600 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              requestDeleteDay(clave);
-                            }}
-                          >
-                            Eliminar
-                          </button>
-                        </div>
+                            {/* Eliminar día */}
+                            <button
+                              type="button"
+                              className="text-[11px] text-red-600 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50"
+                              onClick={() => requestDeleteDay(clave)}
+                            >
+                              Eliminar
+                            </button>
+                          </div>
                         )}
-                        {/* Input Nombre Día (solo en modo edición) / Texto */}
-                        {isEditing ? (
+                        
+                        {/* Flecha de apertura */}
+                        <span
+                          className={`ml-3 shrink-0 transform transition-transform duration-300 text-gray-700 ${
+                            isOpen ? "rotate-180" : "rotate-0"
+                          }`}
+                        >
+                          ∨
+                        </span>
+                      </div>
+                      
+                      {/* INPUT Nombre Día (debajo, solo en modo edición) */}
+                      {isEditing && (
+                        <div
+                          className="mt-2 w-full" // Ocupa todo el ancho
+                          onClick={(e) => e.stopPropagation()} // Evitar toggle al hacer click en el input
+                        >
                           <input
                             type="text"
                             className="w-full rounded border border-gray-300 px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
                             placeholder="Nombre del día (ej: Full body, Piernas, Push...)"
                             value={nombreExtra}
-                            onClick={(e) => e.stopPropagation()}
                             onChange={(e) =>
                               handleNombreDiaChange(clave, e.target.value)
                             }
                           />
-                        ) : nombreExtra ? (
-                            <p className="text-xs text-gray-700 mt-1 pl-1 italic font-normal">{nombreExtra}</p>
-                        ) : null}
-                      </div>
-
-                    </div>
-
-                    <span
-                      className={`ml-3 shrink-0 transform transition-transform duration-300 text-gray-700 ${
-                        isOpen ? "rotate-180" : "rotate-0"
-                      }`}
-                    >
-                      ∨
-                    </span>
-                  </div>
-
-                  {/* Panel de ejercicios */}
-                  <div
-                    id={`panel-${clave}`}
-                    ref={(el) => {
-                      contentRefs.current[clave] = el;
-                    }}
-                    className="overflow-hidden transition-[height] duration-300 ease-in-out px-4"
-                    style={{ height: isOpen ? contentHeight : 0 }}
-                  >
-                    <div className="py-3">
-                      {!rutinaDia && (
-                        <p className="text-gray-500 text-sm">
-                          Cargando ejercicios...
-                        </p>
+                        </div>
                       )}
-
-                      {rutinaDia &&
-                        Array.isArray(rutinaDia.ejercicios) &&
-                        rutinaDia.ejercicios.length === 0 && (
+                    </div>
+                    
+                    {/* Panel de ejercicios */}
+                    <div
+                      id={`panel-${clave}`}
+                      ref={(el) => {
+                        contentRefs.current[clave] = el;
+                      }}
+                      className="overflow-hidden transition-[height] duration-300 ease-in-out px-4"
+                      style={{ height: isOpen ? contentHeight : 0 }}
+                    >
+                      <div className="py-3">
+                        {!rutinaDia && (
                           <p className="text-gray-500 text-sm">
-                            Todavía no hay ejercicios en este día.
+                            Cargando ejercicios...
                           </p>
                         )}
 
-                      {rutinaDia && Array.isArray(rutinaDia.ejercicios) && (
-                        <div className="space-y-3">
-                            {/* Etiquetas Series y Peso (solo si no estamos editando) */}
-                            {!isEditing && rutinaDia.ejercicios.length > 0 && (
-                                <div className="hidden sm:grid grid-cols-12 gap-2 text-gray-500 text-[10px] font-medium uppercase mb-1 border-b border-gray-300 pb-1">
-                                    {/* Ajuste de columnas para que coincida con el modo de visualización */}
-                                    <div className="sm:col-span-1"></div> 
-                                    <div className="sm:col-span-7 pl-1">Ejercicio</div>
-                                    <div className="sm:col-span-2 text-center">Series</div>
-                                    <div className="sm:col-span-2 text-right pr-1">Peso</div>
+                        {rutinaDia &&
+                          Array.isArray(rutinaDia.ejercicios) &&
+                          rutinaDia.ejercicios.length === 0 && (
+                            <p className="text-gray-500 text-sm">
+                              Todavía no hay ejercicios en este día.
+                            </p>
+                          )}
+
+                        {rutinaDia && Array.isArray(rutinaDia.ejercicios) && (
+                          <div className="space-y-3">
+                              {/* Etiquetas Series y Peso (solo si no estamos editando) */}
+                              {!isEditing && rutinaDia.ejercicios.length > 0 && (
+                                  <div className="hidden sm:grid grid-cols-12 gap-2 text-gray-500 text-[10px] font-medium uppercase mb-1 border-b border-gray-300 pb-1">
+                                      {/* Ajuste de columnas para que coincida con el modo de visualización */}
+                                      <div className="sm:col-span-1"></div> 
+                                      <div className="sm:col-span-7 pl-1">Ejercicio</div>
+                                      <div className="sm:col-span-2 text-center">Series</div>
+                                      <div className="sm:col-span-2 text-right pr-1">Peso</div>
+                                  </div>
+                              )}
+
+                            {rutinaDia.ejercicios.map((ej, origIndex) => {
+                              const nombreEj = ej?.ejercicio ?? "";
+                              const pesoValue =
+                                draftPesos[clave]?.[origIndex] ??
+                                (rutinaDia.ejercicios[origIndex]?.peso ?? "");
+                              const seriesValue =
+                                draftSeries[clave]?.[origIndex] ??
+                                (rutinaDia.ejercicios[origIndex]?.series ?? "");
+                              const ejId =
+                                nombreEj.trim() !== ""
+                                  ? findExerciseId(nombreEj)
+                                  : null;
+
+                              
+                              return (
+                                <div
+                                  key={`${clave}-${origIndex}`}
+                                  className={`border-b border-gray-200 pb-3 last:border-b-0 ${isEditing ? 'space-y-1' : 'grid grid-cols-12 gap-2 items-start'}`}
+                                >
+                                  {isEditing ? (
+                                      /* ────────── MODO EDICIÓN ────────── */
+                                      <div className="flex flex-col gap-1">
+                                          {/* Fila 1: Ejercicio */}
+                                          <label className="text-[10px] font-medium text-gray-500 uppercase">Ejercicio</label>
+                                          <input
+                                              type="text"
+                                              className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                              placeholder="Nombre del ejercicio"
+                                              value={nombreEj}
+                                              onChange={(e) =>
+                                                  handleEjercicioNombreChange(
+                                                      clave,
+                                                      origIndex,
+                                                      e.target.value
+                                                  )
+                                              }
+                                          />
+
+                                          {/* Fila 2: Series y Peso (Grid 2/3) + Botones Control (1/3) */}
+                                          <div className="grid grid-cols-2 gap-2">
+                                              {/* Series (Col 1) */}
+                                              <div className="col-span-1 flex flex-col gap-1">
+                                                  <label className="text-[10px] font-medium text-gray-500 uppercase">Series</label>
+                                                  <input
+                                                      type="text"
+                                                      className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs text-center bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                                      placeholder="Series"
+                                                      value={seriesValue}
+                                                      onChange={(e) =>
+                                                          handleSeriesChange(
+                                                              clave,
+                                                              origIndex,
+                                                              e.target.value
+                                                          )
+                                                      }
+                                                  />
+                                              </div>
+                                              {/* Peso (Col 2) */}
+                                              <div className="col-span-1 flex flex-col gap-1">
+                                                  <label className="text-[10px] font-medium text-gray-500 uppercase">Peso</label>
+                                                  <input
+                                                      type="text"
+                                                      className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs text-center bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                                      placeholder="Peso"
+                                                      value={pesoValue}
+                                                      onChange={(e) =>
+                                                          handlePesoChange(
+                                                              clave,
+                                                              origIndex,
+                                                              e.target.value
+                                                          )
+                                                      }
+                                                  />
+                                              </div>
+                                              {/* Botones de Control (Col 3) */}
+                                              <div className="col-span-1 flex items-end justify-between gap-1 h-full">
+                                                  <button
+                                                      type="button"
+                                                      className="text-[10px] w-[100%] px-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-700 leading-none h-6 disabled:opacity-50"
+                                                      onClick={() => handleMoveExercise(clave, origIndex, "up")}
+                                                      disabled={origIndex === 0}
+                                                  >
+                                                      ↑
+                                                  </button>
+                                                  <button
+                                                      type="button"
+                                                      className="text-[10px] w-[100%] px-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-700 leading-none h-6 disabled:opacity-50"
+                                                      onClick={() => handleMoveExercise(clave, origIndex, "down")}
+                                                      disabled={origIndex === rutinaDia.ejercicios.length - 1}
+                                                  >
+                                                      ↓
+                                                  </button>
+                                              </div>
+                                              <div className="col-span-1 flex items-end justify-between gap-1 h-full">
+                                                  <button
+                                                      type="button"
+                                                      className="w-[100%] text-red-600 hover:text-red-700 text-[10px] p-1 border border-red-200 rounded leading-none h-6"
+                                                      onClick={() => requestDeleteExercise(clave, origIndex)}
+                                                  >
+                                                      Eliminar
+                                                  </button>
+                                              </div>
+
+                                          </div>
+                                      </div>
+                                  ) : (
+                                      /* ────────── MODO VISUALIZACIÓN ────────── */
+                                      <>
+                                          {/* Columna de Movimiento (oculta en visualización) */}
+                                          <div className="sm:col-span-1 hidden sm:block"></div> 
+
+                                          {/* Ejercicio */}
+                                          <div className="col-span-12 sm:col-span-7 flex flex-col gap-1">
+                                              <p className="font-semibold text-sm text-gray-800 break-words pt-1.5">
+                                                  {nombreEj}
+                                              </p>
+                                              {ejId && nombreEj.trim() !== "" && (
+                                                  <button
+                                                      type="button"
+                                                      className="self-start text-[11px] text-indigo-600 hover:text-indigo-700 underline decoration-dotted"
+                                                      onClick={() => setModalEjId(ejId)}
+                                                  >
+                                                      Ver técnica / imagen
+                                                  </button>
+                                              )}
+                                          </div>
+
+                                          {/* Series */}
+                                          <div className="col-span-6 sm:col-span-2 flex flex-col items-center">
+                                              <p className="font-semibold text-sm text-gray-800 break-words mt-1.5 sm:mt-0">
+                                                  {seriesValue || <span className="text-gray-400">-</span>}
+                                              </p>
+                                              {/* Etiqueta debajo solo en móvil para visualización */}
+                                              <p className="sm:hidden text-[10px] text-gray-500 font-medium mt-0.5">Series</p>
+                                          </div>
+
+                                          {/* Peso */}
+                                          <div className="col-span-6 sm:col-span-2 flex flex-col items-end">
+                                              <p className="font-semibold text-sm text-gray-800 break-words mt-1.5 sm:mt-0">
+                                                  {pesoValue || <span className="text-gray-400">-</span>}
+                                              </p>
+                                              {/* Etiqueta debajo solo en móvil para visualización */}
+                                              <p className="sm:hidden text-[10px] text-gray-500 font-medium mt-0.5">Peso</p>
+                                          </div>
+                                          
+                                      </>
+                                  )}
                                 </div>
-                            )}
-
-                          {rutinaDia.ejercicios.map((ej, origIndex) => {
-                            const nombreEj = ej?.ejercicio ?? "";
-                            const pesoValue =
-                              draftPesos[clave]?.[origIndex] ??
-                              (rutinaDia.ejercicios[origIndex]?.peso ?? "");
-                            const seriesValue =
-                              draftSeries[clave]?.[origIndex] ??
-                              (rutinaDia.ejercicios[origIndex]?.series ?? "");
-                            const ejId =
-                              nombreEj.trim() !== ""
-                                ? findExerciseId(nombreEj)
-                                : null;
-
-                            // Clase base para el contenedor principal de cada ejercicio
-                            // En modo edición usaremos un div sin grid para el ejercicio, y un grid para los controles
-                            
-                            return (
-                              <div
-                                key={`${clave}-${origIndex}`}
-                                className={`border-b border-gray-200 pb-3 last:border-b-0 ${isEditing ? 'space-y-1' : 'grid grid-cols-12 gap-2 items-start'}`}
-                              >
-                                {isEditing ? (
-                                    /* ────────── MODO EDICIÓN ────────── */
-                                    <div className="flex flex-col gap-1">
-                                        <label className="text-[10px] font-medium text-gray-500 uppercase">Ejercicio</label>
-                                        <input
-                                            type="text"
-                                            className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                                            placeholder="Nombre del ejercicio"
-                                            value={nombreEj}
-                                            onChange={(e) =>
-                                                handleEjercicioNombreChange(
-                                                    clave,
-                                                    origIndex,
-                                                    e.target.value
-                                                )
-                                            }
-                                        />
-                                        {/* Fila Series + Peso + Botones */}
-                                        <div className="grid grid-cols-12 gap-2 mt-1">
-                                            {/* Series */}
-                                            <div className="col-span-4 flex flex-col gap-1">
-                                                <label className="text-[10px] font-medium text-gray-500 uppercase">Series</label>
-                                                <input
-                                                    type="text"
-                                                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs text-center bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                                                    placeholder="Series"
-                                                    value={seriesValue}
-                                                    onChange={(e) =>
-                                                        handleSeriesChange(
-                                                            clave,
-                                                            origIndex,
-                                                            e.target.value
-                                                        )
-                                                    }
-                                                />
-                                            </div>
-                                            {/* Peso */}
-                                            <div className="col-span-4 flex flex-col gap-1">
-                                                <label className="text-[10px] font-medium text-gray-500 uppercase">Peso</label>
-                                                <input
-                                                    type="text"
-                                                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs text-center bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                                                    placeholder="Peso"
-                                                    value={pesoValue}
-                                                    onChange={(e) =>
-                                                        handlePesoChange(
-                                                            clave,
-                                                            origIndex,
-                                                            e.target.value
-                                                        )
-                                                    }
-                                                />
-                                            </div>
-                                            {/* Controles: Mover/Eliminar */}
-                                            <div className="col-span-4 flex items-end justify-end gap-1">
-                                                <button
-                                                    type="button"
-                                                    className="text-[10px] px-4 rounded bg-gray-200 hover:bg-gray-300 text-gray-700 leading-none h-full"
-                                                    onClick={() => handleMoveExercise(clave, origIndex, "up")}
-                                                >
-                                                    ↑
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    className="text-[10px] px-4 rounded bg-gray-200 hover:bg-gray-300 text-gray-700 leading-none h-full"
-                                                    onClick={() => handleMoveExercise(clave, origIndex, "down")}
-                                                >
-                                                    ↓
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    className="text-red-600 hover:text-red-700 text-[10px] p-1 border border-red-200 rounded leading-none h-full"
-                                                    onClick={() => requestDeleteExercise(clave, origIndex)}
-                                                >
-                                                    Eliminar
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    /* ────────── MODO VISUALIZACIÓN ────────── */
-                                    <>
-                                        {/* Columna de Movimiento (oculta en visualización) */}
-                                        <div className="sm:col-span-1 hidden sm:block"></div> 
-
-                                        {/* Ejercicio */}
-                                        <div className="col-span-12 sm:col-span-7 flex flex-col gap-1">
-                                            <p className="font-semibold text-sm text-gray-800 break-words pt-1.5">
-                                                {nombreEj}
-                                            </p>
-                                            {ejId && nombreEj.trim() !== "" && (
-                                                <button
-                                                    type="button"
-                                                    className="self-start text-[11px] text-indigo-600 hover:text-indigo-700 underline decoration-dotted"
-                                                    onClick={() => setModalEjId(ejId)}
-                                                >
-                                                    Ver técnica / imagen
-                                                </button>
-                                            )}
-                                        </div>
-
-                                        {/* Series */}
-                                        <div className="col-span-6 sm:col-span-2 flex flex-col items-center">
-                                            <p className="font-semibold text-sm text-gray-800 break-words mt-1.5 sm:mt-0">
-                                                {seriesValue || <span className="text-gray-400">-</span>}
-                                            </p>
-                                            {/* Etiqueta debajo solo en móvil para visualización */}
-                                            <p className="sm:hidden text-[10px] text-gray-500 font-medium mt-0.5">Series</p>
-                                        </div>
-
-                                        {/* Peso */}
-                                        <div className="col-span-6 sm:col-span-2 flex flex-col items-end">
-                                            <p className="font-semibold text-sm text-gray-800 break-words mt-1.5 sm:mt-0">
-                                                {pesoValue || <span className="text-gray-400">-</span>}
-                                            </p>
-                                            {/* Etiqueta debajo solo en móvil para visualización */}
-                                            <p className="sm:hidden text-[10px] text-gray-500 font-medium mt-0.5">Peso</p>
-                                        </div>
-                                        
-                                    </>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      
-                        {/* Botón Agregar Ejercicio (solo en modo edición) */}
-                        {isEditing && (
-                          <div className="mt-3">
-                            <button
-                              type="button"
-                              className="w-full text-xs font-medium px-3 py-2 rounded border border-dashed border-indigo-400 text-indigo-600 hover:bg-indigo-50"
-                              onClick={() => handleAddExercise(clave)}
-                            >
-                              + Agregar ejercicio
-                            </button>
+                              );
+                            })}
                           </div>
                         )}
+
+                        
+                        	{/* Botón Agregar Ejercicio (solo en modo edición) */}
+                        	{isEditing && (
+                        		<div className="mt-3">
+                        			<button
+                        				type="button"
+                        				className="w-full text-xs font-medium px-3 py-2 rounded border border-dashed border-indigo-400 text-indigo-600 hover:bg-indigo-50"
+                        				onClick={() => handleAddExercise(clave)}
+                        			>
+                        				+ Agregar ejercicio
+                        			</button>
+                        		</div>
+                        	)}
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
 
-            {orderedKeys.length === 0 && (
-              <p className="text-xs text-gray-500 text-center py-4">
-                Todavía no tenés días cargados en tu rutina. Podés crear uno al
-                activar el <span className="font-semibold">“Modo Edición”</span>.
-              </p>
-            )}
+              {orderedKeys.length === 0 && (
+                <p className="text-xs text-gray-500 text-center py-4">
+                  Todavía no tenés días cargados en tu rutina. Podés crear uno al
+                  activar el <span className="font-semibold">“Modo Edición”</span>.
+                </p>
+              )}
+            </div>
+
+            {/* Barra sticky de guardado */}
+            <div
+              className="
+                sticky bottom-0 
+                mt-4 -mx-4 px-4 
+                pt-3 pb-3 
+                bg-white/95 backdrop-blur 
+                border-t border-gray-200 
+                flex items-center justify-between gap-3
+              "
+            >
+              <span className="text-[11px] text-gray-500">
+                {isDirty
+                  ? "Tenés cambios sin guardar"
+                  : "Todos los cambios están guardados"}
+              </span>
+
+              <button
+                disabled={!isDirty || saving}
+                onClick={onSaveAll}
+                className={`px-4 py-2 rounded text-white text-xs sm:text-sm font-medium transition
+                  ${
+                    !isDirty || saving
+                      ? "bg-gray-400 cursor-not-allowed"
+                      : "bg-indigo-600 hover:bg-indigo-700"
+                  }`}
+              >
+                {saving ? "Guardando..." : "Guardar cambios"}
+              </button>
+            </div>
           </div>
 
-          {/* Barra sticky de guardado */}
-          <div
-            className="
-              sticky bottom-0 
-              mt-4 -mx-4 px-4 
-              pt-3 pb-3 
-              bg-white/95 backdrop-blur 
-              border-t border-gray-200 
-              flex items-center justify-between gap-3
-            "
-          >
-            <span className="text-[11px] text-gray-500">
-              {isDirty
-                ? "Tenés cambios sin guardar"
-                : "Todos los cambios están guardados"}
-            </span>
-
+          <div className="text-center my-6">
             <button
-              disabled={!isDirty || saving}
-              onClick={onSaveAll}
-              className={`px-4 py-2 rounded text-white text-xs sm:text-sm font-medium transition
-                ${
-                  !isDirty || saving
-                    ? "bg-gray-400 cursor-not-allowed"
-                    : "bg-indigo-600 hover:bg-indigo-700"
-                }`}
+              onClick={() => navigate("/gym-manager/")}
+              className="bg-gray-400 hover:bg-gray-500 px-6 py-2 rounded text-white"
             >
-              {saving ? "Guardando..." : "Guardar cambios"}
+              Volver
             </button>
           </div>
         </div>
 
-        <div className="text-center my-6">
-          <button
-            onClick={() => navigate("/gym-manager/")}
-            className="bg-gray-400 hover:bg-gray-500 px-6 py-2 rounded text-white"
+        {/* Modal imagen/técnica del ejercicio */}
+        {renderModal()}
+
+        {/* Popup de cuota vencida (fuerte, rojo) */}
+        {showVencidoModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setShowVencidoModal(false);
+            }}
           >
-            Volver
-          </button>
-        </div>
-      </div>
-
-      {/* Modal imagen/técnica del ejercicio */}
-      {renderModal()}
-
-      {/* Popup de cuota vencida (fuerte, rojo) */}
-      {showVencidoModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowVencidoModal(false);
-          }}
-        >
-          <div className="w-full max-w-md bg-white rounded-lg shadow-xl overflow-hidden">
-            <div className="px-5 py-3 bg-red-600 text-white font-semibold">
-              ⚠️ Aviso importante
+            <div className="w-full max-w-md bg-white rounded-lg shadow-xl overflow-hidden">
+              <div className="px-5 py-3 bg-red-600 text-white font-semibold">
+                ⚠️ Aviso importante
+              </div>
+              <div className="p-5 space-y-3">
+                <p className="text-base text-gray-800">
+                  Tu cuota se encuentra{" "}
+                  <span className="font-semibold text-red-600">VENCIDA</span>.
+                </p>
+                <p className="text-sm text-gray-600">
+                  Para continuar entrenando sin interrupciones, por favor
+                  regularizá tu pago en recepción.
+                </p>
+                <div className="mt-4 flex justify-end">
+                  <button
+                    className="px-4 py-2 rounded bg-red-600 hover:bg-red-700 text-white"
+                    onClick={() => setShowVencidoModal(false)}
+                  >
+                    Cerrar
+                  </button>
+                </div>
+                </div>
             </div>
-            <div className="p-5 space-y-3">
-              <p className="text-base text-gray-800">
-                Tu cuota se encuentra{" "}
-                <span className="font-semibold text-red-600">VENCIDA</span>.
-              </p>
-              <p className="text-sm text-gray-600">
-                Para continuar entrenando sin interrupciones, por favor
-                regularizá tu pago en recepción.
-              </p>
-              <div className="mt-4 flex justify-end">
-                <button
-                  className="px-4 py-2 rounded bg-red-600 hover:bg-red-700 text-white"
-                  onClick={() => setShowVencidoModal(false)}
-                >
-                  Cerrar
-                </button>
+          </div>
+        )}
+
+        {/* Popup suave de aviso (<= 7 días, no rojo) */}
+        {showSoonModal && !showVencidoModal && (
+          <div
+            className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setShowSoonModal(false);
+            }}
+          >
+            <div className="w-full max-w-md bg-white rounded-lg shadow-lg overflow-hidden border border-amber-200">
+              <div className="px-5 py-3 bg-amber-100 text-amber-900 font-medium">
+                Recordatorio
+              </div>
+              <div className="p-5 space-y-3">
+                <p className="text-base text-gray-800">
+                  Te quedan{" "}
+                  <span className="font-semibold">{diasRestantes}</span>{" "}
+                  {diasRestantes === 1 ? "día" : "días"} para el vencimiento de tu
+                  cuota.
+                </p>
+                <p className="text-sm text-gray-600">
+                  Podés gestionar el pago en recepción para evitar interrupciones.
+                </p>
+                <div className="mt-3 flex justify-end">
+                  <button
+                    className="px-4 py-2 rounded bg-gray-800 hover:bg-gray-900 text-white"
+                    onClick={() => setShowSoonModal(false)}
+                  >
+                    Entendido
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Popup suave de aviso (<= 7 días, no rojo) */}
-      {showSoonModal && !showVencidoModal && (
-        <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowSoonModal(false);
-          }}
-        >
-          <div className="w-full max-w-md bg-white rounded-lg shadow-lg overflow-hidden border border-amber-200">
-            <div className="px-5 py-3 bg-amber-100 text-amber-900 font-medium">
-              Recordatorio
-            </div>
-            <div className="p-5 space-y-3">
-              <p className="text-base text-gray-800">
-                Te quedan{" "}
-                <span className="font-semibold">{diasRestantes}</span>{" "}
-                {diasRestantes === 1 ? "día" : "días"} para el vencimiento de tu
-                cuota.
-              </p>
-              <p className="text-sm text-gray-600">
-                Podés gestionar el pago en recepción para evitar interrupciones.
-              </p>
-              <div className="mt-3 flex justify-end">
-                <button
-                  className="px-4 py-2 rounded bg-gray-800 hover:bg-gray-900 text-white"
-                  onClick={() => setShowSoonModal(false)}
-                >
-                  Entendido
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Popup de confirmación de borrado (días / ejercicios) */}
-      {deleteTarget && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !deleting)
-              setDeleteTarget(null);
-          }}
-        >
-          <div className="w-full max-w-sm bg-white rounded-lg shadow-xl overflow-hidden">
-            <div className="px-5 py-3 bg-gray-100 text-gray-900 font-semibold text-sm">
-              {deleteTarget.type === "day"
-                ? "Eliminar día de la rutina"
-                : "Eliminar ejercicio"}
-            </div>
-            <div className="p-5 space-y-3 text-sm text-gray-700">
-              <p>
+        {/* Popup de confirmación de borrado (días / ejercicios) */}
+        {deleteTarget && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            onClick={(e) => {
+              if (e.target === e.currentTarget && !deleting)
+                setDeleteTarget(null);
+            }}
+          >
+            <div className="w-full max-w-sm bg-white rounded-lg shadow-xl overflow-hidden">
+              <div className="px-5 py-3 bg-gray-100 text-gray-900 font-semibold text-sm">
                 {deleteTarget.type === "day"
-                  ? "¿Querés eliminar este día completo de la rutina? Esta acción no se puede deshacer."
-                  : "¿Querés eliminar este ejercicio de este día? Esta acción no se puede deshacer."}
-              </p>
-              <div className="mt-4 flex justify-end gap-2">
-                <button
-                  type="button"
-                  className="px-4 py-1.5 rounded bg-gray-200 hover:bg-gray-300 text-gray-800 text-sm"
-                  disabled={deleting}
-                  onClick={() => setDeleteTarget(null)}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  className="px-4 py-1.5 rounded bg-red-600 hover:bg-red-700 text-white text-sm"
-                  onClick={confirmDelete}
-                  disabled={deleting}
-                >
-                  {deleting ? "Eliminando..." : "Eliminar"}
-                </button>
+                  ? "Eliminar día de la rutina"
+                  : "Eliminar ejercicio"}
+              </div>
+              <div className="p-5 space-y-3 text-sm text-gray-700">
+                <p>
+                  {deleteTarget.type === "day"
+                    ? "¿Querés eliminar este día completo de la rutina? Esta acción no se puede deshacer."
+                    : "¿Querés eliminar este ejercicio de este día? Esta acción no se puede deshacer."}
+                </p>
+                <div className="mt-4 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    className="px-4 py-1.5 rounded bg-gray-200 hover:bg-gray-300 text-gray-800 text-sm"
+                    disabled={deleting}
+                    onClick={() => setDeleteTarget(null)}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    className="px-4 py-1.5 rounded bg-red-600 hover:bg-red-700 text-white text-sm"
+                    onClick={confirmDelete}
+                    disabled={deleting}
+                  >
+                    {deleting ? "Eliminando..." : "Eliminar"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </>
+
   );
 };
 

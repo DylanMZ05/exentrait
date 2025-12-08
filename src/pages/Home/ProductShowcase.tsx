@@ -5,7 +5,7 @@ import React, { useRef, useState, useEffect } from 'react';
 // URL de la App Móvil para Gym Manager (PLACEHOLDER)
 const GYM_APP_LINK = '/gym-manager/'; 
 // URL de la App Móvil para Barber Manager (PLACEHOLDER)
-const BARBER_APP_LINK = '/barber-manager/'; 
+const BARBER_APP_LINK = '/barber-landing/'; 
 
 // === Hook Personalizado useInView (Con control de Sincronización) ===
 const useInView = <T extends HTMLElement>(threshold: number = 0.1, once: boolean = true) => {
@@ -124,7 +124,7 @@ const ProductShowcase: React.FC = () => {
                             <div 
                                 className="absolute inset-0 bg-cover bg-center transition-transform duration-500 ease-out transform group-hover:scale-[1.05]"
                                 style={{
-                                    backgroundImage: `url(src/assets/gym-app.webp)`, 
+                                    backgroundImage: `url(assets/gym-app.webp)`, 
                                     // Aseguramos que la imagen cubra completamente el área cuadrada
                                     backgroundSize: 'cover',
                                     backgroundPosition: 'center',
@@ -178,7 +178,7 @@ const ProductShowcase: React.FC = () => {
                         className={`${getFinalClasses(barberVisibility, barberShouldAnimate)} `}
                     >
                         <a 
-                            href="/barber-manager/" 
+                            href="/barber-landing/" 
                             // 🔑 CLASES MODIFICADAS: Ahora usa md:aspect-square y h-auto en md
                             className={`block h-[500px] md:h-auto md:aspect-square 
                                         relative overflow-hidden bg-[#E8E8E8] group`}
@@ -187,7 +187,7 @@ const ProductShowcase: React.FC = () => {
                             <div 
                                 className="absolute inset-0 bg-cover bg-center transition-transform duration-500 ease-out transform group-hover:scale-[1.05]"
                                 style={{
-                                    backgroundImage: `url(src/assets/barber-app.webp)`,
+                                    backgroundImage: `url(assets/barber-app.webp)`,
                                     backgroundSize: 'cover',
                                     backgroundPosition: 'center',
                                     zIndex: 0,
