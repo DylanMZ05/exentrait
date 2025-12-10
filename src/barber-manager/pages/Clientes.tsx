@@ -1,5 +1,5 @@
 // src/barber-manager/pages/Clientes.tsx
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import {
     collection,
     addDoc,
@@ -7,15 +7,19 @@ import {
     deleteDoc,
     updateDoc,
     doc,
-    serverTimestamp, 
+    serverTimestamp,
     query,
     orderBy,
     Timestamp,
-    where, 
+    where,
     increment,
-    writeBatch, // ⭐ Importar writeBatch para la operación de Saldado Total
+    writeBatch,
+    getDoc
 } from "firebase/firestore";
-import { barberDb } from "../services/firebaseBarber";
+// CORRECCIÓN 1: Importación de 'User' como type.
+import { onAuthStateChanged, type User, signOut } from "firebase/auth";
+import { useNavigate } from "react-router-dom";
+import { barberDb, barberAuth } from "../services/firebaseBarber";
 
 /* ============================================================
     HELPERS GENERALES
@@ -29,7 +33,14 @@ const formatCurrency = (amount: number) => {
 /* ============================================================
     TIPADOS
 ============================================================ */
-// Definimos los métodos de pago (igual que en Ventas.tsx)
+// Interfaz basada en usuariosAuth (Suscripción) - REPLICADO DE Ventas.tsx
+interface UsuarioAuth {
+    id: string;
+    fechaVencimiento: Timestamp;
+    email: string;
+    activo?: boolean;
+}
+
 type PaymentMethod = 'Efectivo' | 'Transferencia' | 'QR/Tarjeta';
 
 interface ClienteData {
@@ -38,27 +49,32 @@ interface ClienteData {
     telefono?: string;
     email?: string;
     notas?: string;
-    // ⭐ CAMBIO CLAVE: Usamos 'visitas' como la métrica principal
-    visitas: number; 
-    deuda: number; // ⭐ NUEVO: Deuda pendiente
-    // El campo 'cortes' se elimina o se considera sinónimo de 'visitas' si persiste en la DB
+    visitas: number;
+    deuda: number; // Deuda GLOBAL (la suma de todos)
 }
 
 interface TransaccionCtaCte {
     id: string;
     monto: number;
     descripcion: string;
-    tipo: 'Ingreso' | 'Gasto' | 'Fiado' | 'Saldado'; // Nuevos tipos
+    tipo: 'Ingreso' | 'Gasto' | 'Fiado' | 'Saldado';
     createdAt: Timestamp;
     barberName: string | null;
+    barberId?: string;
+    barberID?: string; // ⭐ CAMPO CLAVE DE LA FOTO (Firebase)
     metodoPago?: PaymentMethod | 'N/A';
     isSaldado?: boolean;
+    comisionAplicada?: number;
+    clienteId?: string;
 }
 
 interface Empleado {
     id: string;
     nombre: string;
     porcentaje: number;
+    internalEmail?: string;
+    authUid?: string; // ⭐ Coincide con el UID de Auth
+    role?: string;
 }
 
 interface Servicio {
@@ -67,9 +83,12 @@ interface Servicio {
     precio: number;
 }
 
+// ⭐ TIPO NUEVO PARA EL MAPA DE DEUDAS
+type DebtMap = Record<string, Record<string, number>>; // { clienteId: { barberId: monto } }
+
 
 /* ============================================================
-    ICONOS SVG & HELPERS
+    ICONOS SVG
 ============================================================ */
 const IconSearch = () => (
     <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -97,7 +116,7 @@ const IconTrash = () => (
 
 const IconWhatsApp = () => (
     <svg className="w-3.5 h-3.5 mr-1.5" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
     </svg>
 );
 
@@ -116,7 +135,10 @@ const IconCash = () => (
 );
 
 const IconSpinner = ({ size = 'h-4 w-4', color = 'text-white' }) => (
-    <div className={`inline-block animate-spin rounded-full ${size} border-2 ${color}/30 border-t-${color} ${color}`}></div>
+    <svg className={`animate-spin ${size} ${color}`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    </svg>
 );
 
 const IconStar = () => (
@@ -125,69 +147,307 @@ const IconStar = () => (
     </svg>
 );
 
+const IconCheck = () => (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+    </svg>
+);
+
+const IconFilter = () => (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+    </svg>
+);
+
+// ⭐ Icono para Importar Contacto
+const IconPhone = () => (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+    </svg>
+);
+
+
+/* =========================================================
+    AUTENTICACIÓN Y VERIFICACIÓN DE SUSCRIPCIÓN (REPLICADO DE Ventas.tsx)
+========================================================= */
+
+const forceLogout = async (navigate: (path: string) => void) => {
+    try {
+        await signOut(barberAuth);
+    } catch (error) {
+        console.error("Error al cerrar sesión de Firebase:", error);
+    }
+    localStorage.removeItem('barberOwnerId');
+    navigate("/auth");
+};
+
+const checkSubscriptionStatus = async (barberieUid: string, navigate: (path: string) => void, db: typeof barberDb): Promise<boolean> => {
+    try {
+        const ownerRef = doc(db, `usuariosAuth/${barberieUid}`);
+        const ownerSnap = await getDoc(ownerRef);
+
+        if (!ownerSnap.exists()) {
+            console.error("Documento de suscripción (usuariosAuth) no encontrado.");
+            await forceLogout(navigate);
+            return false;
+        }
+
+        const ownerData = ownerSnap.data() as UsuarioAuth;
+        
+        if (ownerData.activo === false) {
+             console.warn("Usuario marcado como inactivo en DB.");
+             await forceLogout(navigate);
+             return false;
+        }
+
+        if (!ownerData.fechaVencimiento) {
+             console.error("Fecha de vencimiento no encontrada en el documento.");
+             await forceLogout(navigate);
+             return false;
+        }
+
+        const expirationDate = ownerData.fechaVencimiento.toDate();
+        
+        const deadlineDate = new Date(expirationDate);
+        deadlineDate.setDate(deadlineDate.getDate() + 1);
+        deadlineDate.setHours(0, 0, 0, 0);
+
+        const currentTime = new Date().getTime();
+
+        if (currentTime >= deadlineDate.getTime()) {
+            console.warn("Suscripción expirada por fecha.");
+            await forceLogout(navigate);
+            return false;
+        }
+
+        return true;
+    } catch (error) {
+        console.error("Error al verificar la suscripción:", error);
+        await forceLogout(navigate);
+        return false;
+    }
+};
+
 
 /* ============================================================
     COMPONENTE PRINCIPAL
 ============================================================ */
 export const Clientes: React.FC = () => {
-    // CRÍTICO: Usar el UID del Dueño (OwnerUID) para la consulta
-    const effectiveBarberieUid = localStorage.getItem('barberOwnerId');
+    const navigate = useNavigate();
+    // CORRECCIÓN 2: Se elimina la declaración redundante `const auth = getAuth();`
+    
+    // ⭐ DETECCIÓN DE ROL (REPLICADO DE Ventas.tsx)
+    const user = barberAuth.currentUser;
+    const uid = user?.uid;
+
+    const ownerUid = localStorage.getItem('barberOwnerId');
+    // Si el usuario logueado (uid) es diferente del owner guardado en local (ownerUid) -> Modo Empleado
+    const isEmployeeMode = uid && ownerUid && uid !== ownerUid;
+    // El UID efectivo para las consultas a Firestore es SIEMPRE el del Dueño
+    const effectiveBarberieUid = ownerUid || uid;
+
+    // ESTADOS DE AUTENTICACIÓN
+    const [currentUser, setCurrentUser] = useState<User | null>(null);
+    const [authInitialized, setAuthInitialized] = useState(false);
+    const [isSubscriptionChecked, setIsSubscriptionChecked] = useState(false);
+    const [isOwner, setIsOwner] = useState(false);
 
 
     const [clientes, setClientes] = useState<ClienteData[]>([]);
-    const [empleados, setEmpleados] = useState<Empleado[]>([]); 
-    const [servicios, setServicios] = useState<Servicio[]>([]); 
+    const [empleados, setEmpleados] = useState<Empleado[]>([]);
+    const [servicios, setServicios] = useState<Servicio[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
+
+    // ⭐ NUEVO: Mapa de deudas detalladas (ClienteID -> { BarberID -> Monto })
+    const [deudaPorBarbero, setDeudaPorBarbero] = useState<DebtMap>({});
 
     // Modales
     const [createModalOpen, setCreateModalOpen] = useState(false);
     const [editModalOpen, setEditModalOpen] = useState(false);
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
     const [ctaCteModalOpen, setCtaCteModalOpen] = useState(false);
-    const [saldarModalOpen, setSaldarModalOpen] = useState(false); // Saldar Individual
-    const [fiadoModalOpen, setFiadoModalOpen] = useState(false); 
-    const [deleteCtaCteModalOpen, setDeleteCtaCteModalOpen] = useState(false); 
-    const [saldarTodoModalOpen, setSaldarTodoModalOpen] = useState(false); // Saldar TODO
+    const [saldarModalOpen, setSaldarModalOpen] = useState(false);
+    const [fiadoModalOpen, setFiadoModalOpen] = useState(false);
+    // CORRECCIÓN 3: La variable se utiliza
+    const [deleteCtaCteModalOpen, setDeleteCtaCteModalOpen] = useState(false);
+    const [saldarTodoModalOpen, setSaldarTodoModalOpen] = useState(false);
 
-    // ⭐ ESTADOS DE BLOQUEO DE UI
+    // Estados de Bloqueo
     const [isSaving, setIsSaving] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [isSaldando, setIsSaldando] = useState(false);
-    const [isFiando, setIsFiando] = useState(false); 
-    const [isDeletingCtaCte, setIsDeletingCtaCte] = useState(false); 
-    const [isSaldandoTodo, setIsSaldandoTodo] = useState(false); // ⭐ Bloqueo Saldar Todo
-    // ⭐ FIN ESTADOS DE BLOQUEO
+    const [isFiando, setIsFiando] = useState(false);
+    const [isDeletingCtaCte, setIsDeletingCtaCte] = useState(false);
+    const [isSaldandoTodo, setIsSaldandoTodo] = useState(false);
 
-    // Estados formularios (Crear/Editar)
+    // Estados formularios
     const [nombre, setNombre] = useState("");
     const [telefono, setTelefono] = useState("");
     const [email, setEmail] = useState("");
     const [notas, setNotas] = useState("");
-    // ⭐ Campo de Visitas/Fidelidad
-    const [visitas, setVisitas] = useState(0); 
+    const [visitas, setVisitas] = useState(0);
 
-    // Estados para Saldar Deuda (TRANSACCIÓN INDIVIDUAL/TOTAL)
+    // Estados para Saldar
     const [saldarBarberId, setSaldarBarberId] = useState('');
     const [saldarMetodoPago, setSaldarMetodoPago] = useState<PaymentMethod>('Efectivo');
-    const [saldarTransaction, setSaldarTransaction] = useState<TransaccionCtaCte | null>(null); // Transacción específica a saldar
+    const [saldarTransaction, setSaldarTransaction] = useState<TransaccionCtaCte | null>(null);
     
-    // ⭐ Estados para Registrar Fiado
+    // Estados para Fiado
     const [fiadoBarberId, setFiadoBarberId] = useState('');
     const [fiadoServiceId, setFiadoServiceId] = useState('');
     const [fiadoMonto, setFiadoMonto] = useState<string>('');
 
+    // Estados para Edición Manual de Saldo (Solo Dueño)
+    const [isEditingBalance, setIsEditingBalance] = useState(false);
+    const [manualBalanceValue, setManualBalanceValue] = useState<string>('');
+
     const [selectedClient, setSelectedClient] = useState<ClienteData | null>(null);
-    const [ctaCteTransacciones, setCtaCteTransacciones] = useState<TransaccionCtaCte[]>([]); 
-    const [transactionToDeleteCtaCte, setTransactionToDeleteCtaCte] = useState<TransaccionCtaCte | null>(null); 
+    const [ctaCteTransacciones, setCtaCteTransacciones] = useState<TransaccionCtaCte[]>([]);
+    const [transactionToDeleteCtaCte, setTransactionToDeleteCtaCte] = useState<TransaccionCtaCte | null>(null);
+
+    // ⭐ Estado para filtrar por empleado en el modal (Select)
+    const [filterEmployeeId, setFilterEmployeeId] = useState<string>('todos');
+
+    // ⭐ IDENTIFICAR EMPLEADO LOGUEADO (REPLICADO DE Ventas.tsx)
+    const loggedInEmployee = useMemo(() => {
+        if (!currentUser) return undefined;
+        const authIdentifier = currentUser.email;
+        const cleanedAuthId = authIdentifier ? authIdentifier.trim().toLowerCase() : '';
+
+        // 1. Coincidencia por UID de Auth (más seguro)
+        let employee = empleados.find(e => e.id === currentUser.uid || e.authUid === currentUser.uid);
+
+        // 2. Fallback por email
+        if (!employee && cleanedAuthId) {
+             employee = empleados.find(e => e.internalEmail?.trim().toLowerCase() === cleanedAuthId);
+        }
+        return employee;
+    }, [empleados, currentUser]);
+
+
+    // ⭐ FILTRADO DINÁMICO DE TRANSACCIONES (Visual - Modal)
+    const visibleTransactions = useMemo(() => {
+        if (filterEmployeeId === 'todos') {
+            return ctaCteTransacciones;
+        }
+        return ctaCteTransacciones.filter(t => {
+            const txOwnerId = t.barberID || t.barberId;
+            return txOwnerId === filterEmployeeId;
+        });
+    }, [ctaCteTransacciones, filterEmployeeId]);
+
+
+    // ⭐ CALCULAR SALDO VISIBLE (Basado en el filtro seleccionado - Modal)
+    const displayedBalance = useMemo(() => {
+        if (!selectedClient) return 0;
+        // Usa visibleTransactions que ya aplica el filtro de empleado
+        return visibleTransactions.reduce((acc, t) => {
+            if (t.tipo === 'Fiado' && !t.isSaldado) {
+                return acc + t.monto;
+            }
+            return acc;
+        }, 0);
+
+    }, [visibleTransactions, selectedClient]);
 
 
     /* ============================================================
-        CARGAR DATOS INICIALES
+        LÓGICA DE CONTACTOS ⭐ NUEVO
     ============================================================ */
-    const loadClientes = useCallback(async () => {
-        if (!effectiveBarberieUid) return; 
+    // Comprobar si la API de Contactos está disponible (típico de navegadores modernos en móvil)
+    const isContactPickerAvailable = 'contacts' in navigator && 'ContactsManager' in window;
+
+    const handleImportContact = async () => {
+        if (!isContactPickerAvailable) {
+            alert("La importación de contactos no está disponible en este dispositivo/navegador.");
+            return;
+        }
+
+        try {
+            // Campos que queremos obtener
+            const properties = ['name', 'tel'];
+            // Opciones: solo queremos un contacto a la vez
+            const options = { multiple: false };
+
+            // Casting de navigator para acceder a la API de contactos
+            const contacts = await (navigator as any).contacts.select(properties, options);
+
+            if (contacts && contacts.length > 0) {
+                const contact = contacts[0];
+                const name = contact.name && contact.name.length > 0 ? contact.name[0] : '';
+                // Obtener el primer número de teléfono
+                const phone = contact.tel && contact.tel.length > 0 ? contact.tel[0] : '';
+
+                if (name) {
+                    setNombre(name);
+                }
+                if (phone) {
+                    // Limpiar el número de teléfono, quitando caracteres no numéricos excepto el '+' inicial
+                    setTelefono(phone.replace(/[^0-9+]/g, ''));
+                }
+            }
+        } catch (error) {
+            // La cancelación o denegación de permisos entran aquí
+            console.error("Error al importar contacto o permiso denegado:", error);
+            // Solo mostrar una alerta si es un error inesperado (la cancelación es esperada)
+            // if (error && (error as any).name !== 'AbortError') { 
+            //     alert("No se pudo importar el contacto o el permiso fue denegado.");
+            // }
+        }
+    };
+
+
+    /* ============================================================
+        CARGAR DATOS INICIALES Y DEUDA DETALLADA
+    ============================================================ */
+    
+    // ⭐ FUNCIONES DE CARGA REPLICADAS
+    const loadDeudasDetalladas = useCallback(async () => {
+        if (!effectiveBarberieUid) return;
         
+        try {
+            const q = query(
+                collection(barberDb, `barber_users/${effectiveBarberieUid}/ventas`),
+                where('tipo', '==', 'Fiado'),
+                where('isSaldado', '==', false)
+            );
+            
+            const snap = await getDocs(q);
+            const mapaDeudas: DebtMap = {};
+
+            snap.forEach(doc => {
+                const data = doc.data();
+                const clientId = data.clienteId;
+                const barberId = data.barberID || data.barberId;
+                const monto = data.monto || 0;
+
+                if (!clientId || !barberId) return;
+
+                if (!mapaDeudas[clientId]) {
+                    mapaDeudas[clientId] = {};
+                }
+                
+                if (!mapaDeudas[clientId][barberId]) {
+                    mapaDeudas[clientId][barberId] = 0;
+                }
+
+                mapaDeudas[clientId][barberId] += monto;
+            });
+
+            setDeudaPorBarbero(mapaDeudas);
+
+        } catch (error) {
+            console.error("Error calculando desglose de deudas:", error);
+        }
+    }, [effectiveBarberieUid]);
+
+
+    const loadClientes = useCallback(async () => {
+        if (!effectiveBarberieUid) {
+            setLoading(false);
+            return;
+        }
         setLoading(true);
         try {
             // 1. Cargar Clientes
@@ -197,172 +457,283 @@ export const Clientes: React.FC = () => {
             );
             const snapClientes = await getDocs(qClientes);
             const list: ClienteData[] = [];
-            snapClientes.forEach((d) => list.push({ 
-                id: d.id, 
-                ...d.data(), 
-                deuda: d.data().deuda || 0, 
-                // ⭐ Usar el campo visitas, con fallback a 0 si no existe (para clientes antiguos)
-                visitas: d.data().visitas || d.data().cortes || 0, 
-            } as ClienteData));
+            
+            snapClientes.forEach((d) => {
+                const data = d.data();
+                const visitasReales = data.visitas ?? data.cortes ?? 0;
+                
+                list.push({
+                    id: d.id,
+                    ...data,
+                    deuda: data.deuda || 0,
+                    visitas: visitasReales,
+                } as ClienteData);
+            });
 
             setClientes(list);
-            localStorage.setItem(`barber_stats_clientes_${effectiveBarberieUid}`, list.length.toString());
 
-            // 2. Cargar Empleados
+            // 2. Cargar Auxiliares
             const qEmpleados = query(collection(barberDb, `barber_users/${effectiveBarberieUid}/empleados`), orderBy("nombre", "asc"));
             const snapEmpleados = await getDocs(qEmpleados);
-            const empleadosList: Empleado[] = snapEmpleados.docs.map(doc => ({ id: doc.id, ...doc.data() } as Empleado));
+            const empleadosList: Empleado[] = snapEmpleados.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            } as Empleado));
             setEmpleados(empleadosList);
             
-            // 3. Cargar Servicios
             const qServicios = query(collection(barberDb, `barber_users/${effectiveBarberieUid}/servicios`), orderBy("nombre", "asc"));
             const snapServicios = await getDocs(qServicios);
             const serviciosList: Servicio[] = snapServicios.docs.map(doc => ({ id: doc.id, ...doc.data() } as Servicio));
             setServicios(serviciosList);
 
+            // 3. CARGAR EL MAPA DE DEUDAS
+            await loadDeudasDetalladas();
+
         } catch (err) {
             console.error(err);
         }
         setLoading(false);
-    }, [effectiveBarberieUid]);
+    }, [effectiveBarberieUid, loadDeudasDetalladas]);
 
+
+    // ⭐ FLUJO DE AUTENTICACIÓN Y CARGA INICIAL (REPLICADO DE Ventas.tsx)
     useEffect(() => {
-        if (effectiveBarberieUid) loadClientes(); 
-    }, [effectiveBarberieUid, loadClientes]);
+        const unsubscribe = onAuthStateChanged(barberAuth, async (user) => {
+            setCurrentUser(user);
+            setAuthInitialized(true);
+            
+            const localOwnerUid = localStorage.getItem('barberOwnerId');
+            const currentEffectiveUid = localOwnerUid || user?.uid;
+
+            if (user) {
+                // 1. Detección de Rol
+                setIsOwner(user.uid === localOwnerUid);
+
+                // 2. Verificación de Suscripción
+                if (currentEffectiveUid) {
+                    const isSubscriptionValid = await checkSubscriptionStatus(currentEffectiveUid, navigate, barberDb);
+                    
+                    if (!isSubscriptionValid) {
+                         setLoading(false);
+                         setIsSubscriptionChecked(true);
+                         return; // Detener si la suscripción no es válida
+                    }
+                    
+                    loadClientes(); // Cargar datos si es válido
+                    setIsSubscriptionChecked(true); // Marcar como chequeado
+                } else {
+                    setLoading(false);
+                    setIsSubscriptionChecked(true);
+                }
+
+            } else {
+                // Si no hay usuario (deslogueado), simplemente se detiene la carga
+                setLoading(false);
+                setIsSubscriptionChecked(true);
+            }
+        });
+
+        return () => unsubscribe();
+    }, [navigate, loadClientes]);
+
+    // ⭐ EFFECT PARA INICIALIZAR EL FILTRO DE LA VISTA PRINCIPAL
+    useEffect(() => {
+        // Solo inicializamos el filtro si estamos en modo empleado, ya tenemos el loggedInEmployee 
+        // y el filtro actual sigue siendo 'todos' (el valor por defecto).
+        if (isEmployeeMode && loggedInEmployee && filterEmployeeId === 'todos') {
+            setFilterEmployeeId(loggedInEmployee.id);
+        }
+    }, [isEmployeeMode, loggedInEmployee, filterEmployeeId]);
+
 
     /* ============================================================
         GESTIÓN DE CTA. CTE.
     ============================================================ */
     
-    // ⭐ Carga transacciones de la Cuenta Corriente
     const loadCtaCteTransacciones = useCallback(async (clientId: string) => {
-        if (!effectiveBarberieUid) return [];
+        if (!effectiveBarberieUid || !authInitialized) return [];
 
         try {
             const qCtaCte = query(
                 collection(barberDb, `barber_users/${effectiveBarberieUid}/ventas`),
                 where('clienteId', '==', clientId),
-                // Solo cargamos Fiado, Saldado (Ingreso) y Gasto
+                // Solo cargamos Fiados, Pagos (Ingreso que salda) y Gastos
                 where('tipo', 'in', ['Fiado', 'Ingreso', 'Gasto']),
                 orderBy('createdAt', 'desc')
             );
             
             const snap = await getDocs(qCtaCte);
+
             const list: TransaccionCtaCte[] = snap.docs
-                .map(d => ({ 
-                    id: d.id, 
-                    ...d.data(), 
-                    isSaldado: d.data().isSaldado || false, 
-                } as TransaccionCtaCte))
-                // Filtramos Ingresos para mostrar solo aquellos que representan pagos de cuenta saldada (para no mezclar con ventas normales si el cliente es fijo)
-                .filter(t => t.tipo === 'Fiado' || t.tipo === 'Gasto' || (t.tipo === 'Ingreso' && t.descripcion.startsWith("Cuenta SALDADA TOTAL de")));
-                
+                .map(d => {
+                    const data = d.data();
+                    const normalizedId = data.barberID || data.barberId || null;
+
+                    return {
+                        id: d.id,
+                        ...data,
+                        barberId: normalizedId,
+                        barberID: data.barberID,
+                        isSaldado: data.isSaldado || false,
+                    } as TransaccionCtaCte;
+                })
+                .filter(t => {
+                    // Solo mostramos transacciones relevantes para el CtaCte
+                    const isPayment = t.tipo === 'Ingreso' && (t.descripcion.startsWith("Cuenta SALDADA TOTAL de") || t.descripcion.startsWith("Pago de Fiado"));
+                    const isValidCtaCteType = t.tipo === 'Fiado' || t.tipo === 'Gasto' || isPayment;
+                    
+                    if (!isValidCtaCteType) return false;
+                    
+                    return true;
+                });
+            
             return list;
 
         } catch (e) {
             console.error("Error al cargar Cta. Cte.:", e);
             return [];
         }
-    }, [effectiveBarberieUid]);
+    }, [effectiveBarberieUid, authInitialized]);
     
     const openCtaCte = async (client: ClienteData) => {
         setSelectedClient(client);
+        setManualBalanceValue(client.deuda.toString());
+        setIsEditingBalance(false);
+        
+        // REGLA DEL EMPLEADO: PRESELECCIONAR EMPLEADO LOGUEADO SI ES MODO EMPLEADO (PARA EL MODAL)
+        if (isEmployeeMode && loggedInEmployee) {
+             setFilterEmployeeId(loggedInEmployee.id);
+        } else {
+             setFilterEmployeeId('todos');
+        }
+        
         setCtaCteModalOpen(true);
-        const transacciones = await loadCtaCteTransacciones(client.id);
-        setCtaCteTransacciones(transacciones);
+        if (authInitialized) {
+            const transacciones = await loadCtaCteTransacciones(client.id);
+            setCtaCteTransacciones(transacciones);
+        }
+    };
+
+    // Actualizar Saldo Manualmente (Solo Dueño)
+    const handleUpdateManualBalance = async () => {
+        if (!selectedClient || !effectiveBarberieUid || !isOwner) return;
+        
+        const newBalance = Number(manualBalanceValue);
+        if (isNaN(newBalance)) return alert("Ingresa un número válido");
+
+        try {
+            await updateDoc(doc(barberDb, `barber_users/${effectiveBarberieUid}/clientes/${selectedClient.id}`), {
+                deuda: newBalance,
+                updatedAt: serverTimestamp(),
+            });
+            
+            setIsEditingBalance(false);
+            await loadClientes();
+            alert("✅ Saldo corregido manualmente.");
+        } catch (e) {
+            console.error("Error al actualizar saldo manual:", e);
+            alert("Error al actualizar saldo.");
+        }
     };
     
-    // ⭐ Registrar Fiado (Corte/Servicio a Crédito)
+    // Registrar Fiado
     const handleRegistrarFiado = async () => {
         if (!selectedClient || !effectiveBarberieUid || isFiando) return;
-        if (!fiadoBarberId || !fiadoMonto || Number(fiadoMonto) <= 0) return alert("Selecciona empleado y monto válido.");
+        
+        const finalBarberId = isEmployeeMode && loggedInEmployee ? loggedInEmployee.id : fiadoBarberId;
+        
+        if (!finalBarberId || !fiadoMonto || Number(fiadoMonto) <= 0) return alert("Selecciona empleado y monto válido.");
 
         setIsFiando(true);
         
         try {
             const monto = Number(fiadoMonto);
             const selectedService = servicios.find(s => s.id === fiadoServiceId);
-            const selectedBarber = empleados.find(e => e.id === fiadoBarberId);
-            const descripcion = selectedService 
-                ? `Fiado - ${selectedService.nombre}` 
+            const selectedBarber = empleados.find(e => e.id === finalBarberId);
+            const descripcion = selectedService
+                ? `Fiado - ${selectedService.nombre}`
                 : `Fiado - Servicio Manual: ${monto}`;
             
             if (!selectedBarber) throw new Error("Empleado no válido.");
 
-            // 1. Crear la transacción de "Fiado"
             await addDoc(collection(barberDb, `barber_users/${effectiveBarberieUid}/ventas`), {
                 monto: monto,
                 descripcion: descripcion,
-                tipo: 'Fiado', // ⭐ Tipo Fiado (para identificar la deuda)
-                date: new Date().toISOString().substring(0, 10), 
-                barberId: fiadoBarberId, 
+                tipo: 'Fiado',
+                date: new Date().toISOString().substring(0, 10),
+                barberId: finalBarberId,
+                barberID: finalBarberId,
                 barberName: selectedBarber.nombre,
                 servicioId: fiadoServiceId || null,
-                comisionAplicada: selectedBarber.porcentaje, 
+                comisionAplicada: selectedBarber.porcentaje,
                 clienteId: selectedClient.id,
                 clienteNombre: selectedClient.nombre,
-                isSaldado: false, // ⭐ Marcar como pendiente
+                isSaldado: false,
                 createdAt: serverTimestamp(),
             });
 
-            // 2. Incrementar la deuda del cliente y la fidelidad (+1 visita)
             await updateDoc(doc(barberDb, `barber_users/${effectiveBarberieUid}/clientes/${selectedClient.id}`), {
                 deuda: increment(monto),
-                visitas: increment(1), // ⭐ Incrementa el campo VISITAS (Fidelidad)
+                visitas: increment(1),
                 updatedAt: serverTimestamp(),
             });
 
-            
             setFiadoModalOpen(false);
-            
-            // Recargar datos para actualizar la lista y saldos
             await loadClientes();
-            // Refrescar modal de CtaCte (si estaba abierto)
-            setCtaCteModalOpen(false); // Forzar cierre para actualizar
+            
+            if (ctaCteModalOpen && selectedClient) {
+                 const transacciones = await loadCtaCteTransacciones(selectedClient.id);
+                 setCtaCteTransacciones(transacciones);
+            }
             
         } catch (e) {
             console.error("Error al registrar fiado:", e);
             alert("Error al registrar el fiado.");
         } finally {
             setIsFiando(false);
-            // El resetFormFiado se llama en el padre o manualmente después de cerrar
         }
     };
 
-    // ⭐ Lógica para Saldar la Deuda (Individual)
+    // Saldar Deuda (Individual)
     const handleSaldarDeuda = async () => {
         if (!selectedClient || !saldarTransaction || !effectiveBarberieUid || isSaldando || saldarTransaction.isSaldado || saldarTransaction.monto <= 0) return;
-        if (!saldarBarberId) return alert("Selecciona un empleado responsable del cobro.");
+        
+        const collectorBarberId = (!isOwner && loggedInEmployee) ? loggedInEmployee.id : saldarBarberId;
+
+        if (!collectorBarberId) return alert("Error de identificación del empleado.");
 
         setIsSaldando(true);
         
         try {
             const montoPagado = saldarTransaction.monto;
-            const selectedBarber = empleados.find(e => e.id === saldarBarberId);
+            
+            const creditToBarberId = saldarTransaction.barberId || collectorBarberId;
 
-            if (!selectedBarber) throw new Error("Empleado no válido.");
+            const selectedBarber = empleados.find(e => e.id === creditToBarberId);
+            if (!selectedBarber) throw new Error("Empleado original o cobrador no válido.");
 
-            // 1. Crear la transacción de "Saldado" (Ingreso General)
+            // Crear el Ingreso
             await addDoc(collection(barberDb, `barber_users/${effectiveBarberieUid}/ventas`), {
                 monto: montoPagado,
                 descripcion: `Pago de Fiado: ${saldarTransaction.descripcion} - Cliente: ${selectedClient.nombre}`,
-                tipo: 'Ingreso', // ⭐ Tipo Ingreso (para sumar al neto)
-                date: new Date().toISOString().substring(0, 10), 
-                barberId: saldarBarberId, 
+                tipo: 'Ingreso',
+                date: new Date().toISOString().substring(0, 10),
+                barberId: creditToBarberId,
+                barberID: creditToBarberId,
                 barberName: selectedBarber.nombre,
-                metodoPago: saldarMetodoPago, 
-                comisionAplicada: 0, // NO aplica comisión (ya se registró en Fiado)
+                metodoPago: saldarMetodoPago,
+                comisionAplicada: selectedBarber.porcentaje,
                 clienteId: selectedClient.id,
                 clienteNombre: selectedClient.nombre,
                 createdAt: serverTimestamp(),
             });
             
-            // 2. Marcar la transacción de Fiado como Saldada
+            // Marcar transacción original como saldada
             await updateDoc(doc(barberDb, `barber_users/${effectiveBarberieUid}/ventas/${saldarTransaction.id}`), {
                 isSaldado: true,
             });
 
-            // 3. Restar el monto a la deuda del cliente
+            // Restar deuda global
             await updateDoc(doc(barberDb, `barber_users/${effectiveBarberieUid}/clientes/${selectedClient.id}`), {
                 deuda: increment(-montoPagado),
                 updatedAt: serverTimestamp(),
@@ -370,10 +741,11 @@ export const Clientes: React.FC = () => {
 
             setSaldarModalOpen(false);
             setSaldarTransaction(null);
-            
-            // Recargar datos y refrescar CtaCte
             await loadClientes();
-            openCtaCte(selectedClient);
+            if (authInitialized) {
+                 const transacciones = await loadCtaCteTransacciones(selectedClient.id);
+                 setCtaCteTransacciones(transacciones);
+            }
             
         } catch (e) {
             console.error("Error al saldar deuda individual:", e);
@@ -384,71 +756,95 @@ export const Clientes: React.FC = () => {
         }
     };
 
-    // ⭐ Lógica para Saldar la Deuda TOTAL
+    // Saldar Deuda TOTAL (Inteligente y Filtrada)
     const handleSaldarDeudaTotal = async () => {
-        if (!selectedClient || !effectiveBarberieUid || isSaldandoTodo || selectedClient.deuda <= 0) return;
-        if (!saldarBarberId) return alert("Selecciona un empleado responsable del cobro.");
+        if (!selectedClient || !effectiveBarberieUid || isSaldandoTodo) return;
+        
+        const collectorBarberId = (!isOwner && loggedInEmployee) ? loggedInEmployee.id : saldarBarberId;
+        if (!collectorBarberId) return alert("Selecciona un empleado responsable.");
 
         setIsSaldandoTodo(true);
         
         try {
-            const deudaTotal = selectedClient.deuda;
-            const selectedBarber = empleados.find(e => e.id === saldarBarberId);
-            
+            const montoASaldar = displayedBalance;
+
+            if (montoASaldar <= 0) {
+                 if (!window.confirm("El saldo visible es $0. ¿Deseas continuar?")) {
+                     setIsSaldandoTodo(false);
+                     return;
+                 }
+            }
+
+            const selectedBarber = empleados.find(e => e.id === collectorBarberId);
             if (!selectedBarber) throw new Error("Empleado no válido.");
 
-            // 1. Obtener todas las transacciones de fiado pendientes
+            // Consultar fiados pendientes EN FIREBASE
             const qFiadosPendientes = query(
                 collection(barberDb, `barber_users/${effectiveBarberieUid}/ventas`),
                 where('clienteId', '==', selectedClient.id),
                 where('tipo', '==', 'Fiado'),
                 where('isSaldado', '==', false)
             );
+            
             const snapPendientes = await getDocs(qFiadosPendientes);
             
-            if (snapPendientes.empty) {
-                throw new Error("No se encontraron fiados pendientes.");
+            const batch = writeBatch(barberDb);
+            let totalRealSaldado = 0;
+
+            let targetFilterId: string | null = null;
+            
+            if (filterEmployeeId !== 'todos') {
+                 targetFilterId = filterEmployeeId;
             }
 
-            const batch = writeBatch(barberDb);
-
-            // 2. Marcar todos los fiados pendientes como saldados en el batch
-            snapPendientes.docs.forEach(docSnap => {
-                const ventaRef = doc(barberDb, `barber_users/${effectiveBarberieUid}/ventas/${docSnap.id}`);
-                batch.update(ventaRef, { isSaldado: true });
-            });
+            if (!snapPendientes.empty) {
+                snapPendientes.docs.forEach(docSnap => {
+                    const data = docSnap.data();
+                    const docBarberId = data.barberID || data.barberId;
+                    
+                    if (!targetFilterId || docBarberId === targetFilterId) {
+                        const ventaRef = doc(barberDb, `barber_users/${effectiveBarberieUid}/ventas/${docSnap.id}`);
+                        batch.update(ventaRef, { isSaldado: true });
+                        totalRealSaldado += data.monto;
+                    }
+                });
+            }
             
-            // 3. Crear la transacción de "Saldado Total" (Ingreso General)
-            const newSaleRef = doc(collection(barberDb, `barber_users/${effectiveBarberieUid}/ventas`));
-            batch.set(newSaleRef, {
-                monto: deudaTotal,
-                descripcion: `Cuenta SALDADA TOTAL de ${selectedClient.nombre}`,
-                tipo: 'Ingreso', 
-                date: new Date().toISOString().substring(0, 10), 
-                barberId: saldarBarberId, 
-                barberName: selectedBarber.nombre,
-                metodoPago: saldarMetodoPago, 
-                comisionAplicada: 0,
-                clienteId: selectedClient.id,
-                clienteNombre: selectedClient.nombre,
-                createdAt: serverTimestamp(),
-            });
+            // Crear Ingreso por el total calculado
+            if (totalRealSaldado > 0) {
+                const newSaleRef = doc(collection(barberDb, `barber_users/${effectiveBarberieUid}/ventas`));
+                batch.set(newSaleRef, {
+                    monto: totalRealSaldado,
+                    descripcion: `Cuenta SALDADA TOTAL de ${selectedClient.nombre}`,
+                    tipo: 'Ingreso',
+                    date: new Date().toISOString().substring(0, 10),
+                    barberId: collectorBarberId,
+                    barberID: collectorBarberId,
+                    barberName: selectedBarber.nombre,
+                    metodoPago: saldarMetodoPago,
+                    comisionAplicada: selectedBarber.porcentaje,
+                    clienteId: selectedClient.id,
+                    clienteNombre: selectedClient.nombre,
+                    createdAt: serverTimestamp(),
+                });
+            }
 
-            // 4. Resetear la deuda del cliente en el batch
+            // Actualizar deuda global del cliente (restando solo lo pagado)
             const clientRef = doc(barberDb, `barber_users/${effectiveBarberieUid}/clientes/${selectedClient.id}`);
+            
             batch.update(clientRef, {
-                deuda: 0,
+                deuda: increment(-totalRealSaldado),
                 updatedAt: serverTimestamp(),
             });
 
-            // 5. Ejecutar todas las operaciones
             await batch.commit();
 
             setSaldarTodoModalOpen(false);
-            
-            // Recargar datos y refrescar CtaCte
             await loadClientes();
-            openCtaCte(selectedClient);
+            if (authInitialized) {
+                 const transacciones = await loadCtaCteTransacciones(selectedClient.id);
+                 setCtaCteTransacciones(transacciones);
+            }
             
         } catch (e) {
             console.error("Error al saldar deuda total:", e);
@@ -460,35 +856,39 @@ export const Clientes: React.FC = () => {
     };
 
 
-    // ⭐ Eliminar una transacción de Fiado de la CtaCte
+    // Eliminar transacción Fiado
+    // CORRECCIÓN 4: La función se utiliza correctamente, eliminando el error TS6133
     const handleDeleteCtaCte = async () => {
         if (!selectedClient || !transactionToDeleteCtaCte || !effectiveBarberieUid || isDeletingCtaCte) return;
         
+        if (transactionToDeleteCtaCte.isSaldado) {
+             alert("⛔ ACCIÓN DENEGADA:\n\nEste fiado YA FUE COBRADO. Si lo eliminas ahora, generarás un desfasaje contable.\n\nSOLUCIÓN: Usa el lápiz de edición junto al Saldo Pendiente para corregir el monto final manualmente si es necesario.");
+             setDeleteCtaCteModalOpen(false);
+             return;
+        }
+
         const montoEliminado = transactionToDeleteCtaCte.monto;
         
         setIsDeletingCtaCte(true);
 
         try {
-            // 1. Eliminar la transacción de la colección 'ventas'
             await deleteDoc(doc(barberDb, `barber_users/${effectiveBarberieUid}/ventas/${transactionToDeleteCtaCte.id}`));
 
-            // 2. Restar el monto a la deuda del cliente y restaurar el corte de fidelidad
             await updateDoc(doc(barberDb, `barber_users/${effectiveBarberieUid}/clientes/${selectedClient.id}`), {
                 deuda: increment(-montoEliminado),
-                visitas: increment(-1), // ⭐ Decrementa el campo VISITAS (Fidelidad)
+                visitas: increment(-1),
                 updatedAt: serverTimestamp(),
             });
 
-            // 3. Cerrar modales y recargar
             setDeleteCtaCteModalOpen(false);
             setTransactionToDeleteCtaCte(null);
             
-            // Recargar clientes y la CtaCte (la CtaCte se actualizará en la apertura del modal)
-            await loadClientes(); 
-            // Reabrir CtaCte para refrescar la lista de transacciones (lo más simple)
-            openCtaCte(selectedClient);
+            await loadClientes();
+            if (authInitialized) {
+                 const transacciones = await loadCtaCteTransacciones(selectedClient.id);
+                 setCtaCteTransacciones(transacciones);
+            }
 
-            
         } catch (e) {
             console.error("Error al eliminar transacción de CtaCte:", e);
             alert("Error al eliminar la transacción.");
@@ -496,23 +896,19 @@ export const Clientes: React.FC = () => {
             setIsDeletingCtaCte(false);
         }
     };
-
-    // ⭐ Lógica para el botón de WhatsApp (Inteligente)
-    const getWhatsAppLinkCtaCte = (client: ClienteData) => {
+    
+    const getWhatsAppLinkCtaCte = (client: ClienteData, deudaVisible: number) => {
         const cleanNumber = client.telefono ? client.telefono.replace(/\D/g, "") : '';
-        const deuda = client.deuda || 0;
+        const deuda = deudaVisible > 0 ? deudaVisible : 0;
         
-        // ⭐ CONDICIONAL: Solo si tiene deuda > 0
         if (deuda > 0) {
-            const message = `¡Hola ${client.nombre}! Adjunto el resumen de tu cuenta pendiente:\n\nRESUMEN DE CUENTA:\nTe resta pagar ${formatCurrency(deuda)} por los servicios brindados. Por favor, realiza el pago a la brevedad. ¡Gracias!`;
-            return `https://wa.me/${cleanNumber}?text=${encodeURIComponent(message)}`;
+             const message = `¡Hola ${client.nombre}! Adjunto el resumen de tu cuenta pendiente:\n\nRESUMEN DE CUENTA:\nTe resta pagar ${formatCurrency(deuda)} por los servicios brindados. Por favor, realiza el pago a la brevedad. ¡Gracias!`;
+             return `https://wa.me/${cleanNumber}?text=${encodeURIComponent(message)}`;
         }
         
-        // Si no tiene deuda, mensaje predeterminado
         return `https://wa.me/${cleanNumber}?text=${encodeURIComponent(`Hola ${client.nombre}, me gustaría coordinar un turno.`)}`;
     };
 
-    // ⭐ Función para actualizar el contador de Visitas directamente desde la UI
     const updateVisitas = async (client: ClienteData, delta: number) => {
         if (!effectiveBarberieUid) return;
         const newVisitas = Math.max(0, client.visitas + delta);
@@ -520,13 +916,38 @@ export const Clientes: React.FC = () => {
 
         try {
             await updateDoc(doc(barberDb, `barber_users/${effectiveBarberieUid}/clientes/${client.id}`), {
-                visitas: newVisitas, // ⭐ Actualizar el campo Visitas
+                visitas: newVisitas,
                 updatedAt: serverTimestamp(),
             });
             loadClientes();
         } catch (e) {
             console.error("Error al actualizar visitas:", e);
             alert("Error al actualizar el contador de fidelidad.");
+        }
+    };
+
+    const handleCanjear = async (client: ClienteData, e?: React.MouseEvent) => {
+        if (e) {
+             e.preventDefault();
+             e.stopPropagation();
+        }
+        
+        if (!effectiveBarberieUid) return;
+        
+        if (!window.confirm(`¿Canjear corte GRATIS para ${client.nombre}? Se reiniciarán las visitas a 0.`)) return;
+
+        setClientes(prev => prev.map(c => c.id === client.id ? { ...c, visitas: 0 } : c));
+
+        try {
+            await updateDoc(doc(barberDb, `barber_users/${effectiveBarberieUid}/clientes/${client.id}`), {
+                visitas: 0,
+                updatedAt: serverTimestamp(),
+            });
+            await loadClientes();
+        } catch (e) {
+            console.error("Error al canjear visitas:", e);
+            alert("Error al procesar el canje.");
+            loadClientes();
         }
     };
 
@@ -537,7 +958,7 @@ export const Clientes: React.FC = () => {
         if (!nombre.trim()) return alert("El nombre es obligatorio");
         if (!effectiveBarberieUid || isSaving) return;
 
-        setIsSaving(true); // ⭐ Bloquea el botón
+        setIsSaving(true);
         
         try {
             await addDoc(collection(barberDb, `barber_users/${effectiveBarberieUid}/clientes`), {
@@ -545,25 +966,25 @@ export const Clientes: React.FC = () => {
                 telefono: telefono.trim(),
                 email: email.trim(),
                 notas: notas.trim(),
-                visitas: 0, // ⭐ Inicializar Visitas
-                deuda: 0, // ⭐ Inicializar la deuda
+                visitas: 0,
+                deuda: 0,
                 createdAt: serverTimestamp(),
             });
             setCreateModalOpen(false);
             resetForm();
-            loadClientes(); 
+            loadClientes();
         } catch (e) {
             console.error(e);
             alert("Error al crear cliente");
         } finally {
-            setIsSaving(false); // ⭐ Desbloquea el botón
+            setIsSaving(false);
         }
     };
 
     const handleEdit = async () => {
         if (!selectedClient || !effectiveBarberieUid || isSaving) return;
         
-        setIsSaving(true); // ⭐ Bloquea el botón
+        setIsSaving(true);
         
         try {
             await updateDoc(doc(barberDb, `barber_users/${effectiveBarberieUid}/clientes/${selectedClient.id}`), {
@@ -571,7 +992,7 @@ export const Clientes: React.FC = () => {
                 telefono: telefono.trim(),
                 email: email.trim(),
                 notas: notas.trim(),
-                visitas: Number(visitas), // ⭐ Usar el campo visitas
+                visitas: Number(visitas),
                 updatedAt: serverTimestamp(),
             });
             setEditModalOpen(false);
@@ -581,25 +1002,25 @@ export const Clientes: React.FC = () => {
             console.error(e);
             alert("Error al editar");
         } finally {
-            setIsSaving(false); // ⭐ Desbloquea el botón
+            setIsSaving(false);
         }
     };
 
     const handleDelete = async () => {
         if (!selectedClient || !effectiveBarberieUid || isDeleting) return;
         
-        setIsDeleting(true); // ⭐ Bloquea el botón
+        setIsDeleting(true);
         
         try {
             await deleteDoc(doc(barberDb, `barber_users/${effectiveBarberieUid}/clientes/${selectedClient.id}`));
             setDeleteModalOpen(false);
             setSelectedClient(null);
-            loadClientes(); 
+            loadClientes();
         } catch (e) {
             console.error(e);
             alert("Error al eliminar");
         } finally {
-            setIsDeleting(false); // ⭐ Desbloquea el botón
+            setIsDeleting(false);
         }
     };
 
@@ -607,22 +1028,26 @@ export const Clientes: React.FC = () => {
     /* ============================================================
         HELPERS UI
     ============================================================ */
+    // ⭐ MODIFICADO: Solo limpieza de estados no relacionados con el filtro de la vista principal.
     const resetForm = () => {
         setNombre("");
         setTelefono("");
         setEmail("");
         setNotas("");
-        setVisitas(0); // ⭐ Resetear Visitas
+        setVisitas(0);
         setSelectedClient(null);
-        resetFormSaldar();
-        resetFormFiado();
         setCtaCteTransacciones([]);
-        setTransactionToDeleteCtaCte(null); // Resetear también
-        setSaldarTransaction(null); // Resetear transacción a saldar
+        setTransactionToDeleteCtaCte(null);
+        setSaldarTransaction(null);
+        setIsEditingBalance(false);
     };
     
     const resetFormSaldar = () => {
-        setSaldarBarberId(empleados[0]?.id || '');
+        if (isEmployeeMode && loggedInEmployee) {
+             setSaldarBarberId(loggedInEmployee.id);
+        } else {
+             setSaldarBarberId(empleados[0]?.id || '');
+        }
         setSaldarMetodoPago('Efectivo');
     };
     
@@ -630,9 +1055,20 @@ export const Clientes: React.FC = () => {
         const defaultServiceId = servicios[0]?.id || '';
         const defaultServicePrice = servicios.find(s => s.id === defaultServiceId)?.precio.toString() || '';
         
-        setFiadoBarberId(empleados[0]?.id || '');
+        if (isEmployeeMode && loggedInEmployee) {
+             setFiadoBarberId(loggedInEmployee.id);
+        } else {
+             setFiadoBarberId(empleados[0]?.id || '');
+        }
+
         setFiadoServiceId(defaultServiceId);
         setFiadoMonto(defaultServicePrice);
+    };
+
+    // ⭐ FUNCIÓN DE CIERRE LIMPIA DEL MODAL CTA CTE (IMPLEMENTADA)
+    const closeCtaCte = () => {
+        setCtaCteModalOpen(false);
+        resetForm(); 
     };
 
 
@@ -642,7 +1078,7 @@ export const Clientes: React.FC = () => {
         setTelefono(client.telefono || "");
         setEmail(client.email || "");
         setNotas(client.notas || "");
-        setVisitas(client.visitas || 0); // ⭐ Cargar visitas
+        setVisitas(client.visitas || 0);
         setEditModalOpen(true);
     };
 
@@ -651,18 +1087,16 @@ export const Clientes: React.FC = () => {
         setDeleteModalOpen(true);
     };
 
-    // ⭐ Función para abrir el modal de saldar una transacción específica
     const openSaldarTransaction = (client: ClienteData, transaction: TransaccionCtaCte) => {
         setSelectedClient(client);
-        setSaldarTransaction(transaction); // Establecer la transacción a saldar
+        setSaldarTransaction(transaction);
         resetFormSaldar();
         setSaldarModalOpen(true);
     };
     
-    // ⭐ Función para abrir el modal de saldar TODA la deuda
     const openSaldarTodo = (client: ClienteData) => {
         setSelectedClient(client);
-        setSaldarTransaction(null); // Asegurarse de que no haya transacción individual
+        setSaldarTransaction(null);
         resetFormSaldar();
         setSaldarTodoModalOpen(true);
     };
@@ -685,50 +1119,103 @@ export const Clientes: React.FC = () => {
 
 
     /* ============================================================
-        FILTRADO
+        FILTRADO UI
     ============================================================ */
-    const filteredClients = clientes.filter(c => 
-        c.nombre.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    const filteredClients = clientes.filter(c =>
+        c.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (c.telefono && c.telefono.includes(searchTerm))
     );
+
+    const isFilteredView = filterEmployeeId !== 'todos';
 
     const inputClass = "w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-slate-800 focus:border-transparent outline-none transition-all text-sm";
     const btnPrimary = "w-full py-2.5 bg-slate-900 text-white rounded-lg hover:bg-slate-800 active:scale-[0.98] transition font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed";
     const btnSecondary = "w-full py-2.5 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 active:scale-[0.98] transition font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed";
 
+    // PANTALLA DE CARGA DE AUTENTICACIÓN (REPLICADO DE Ventas.tsx)
+    if (!isSubscriptionChecked) {
+        return (
+            <div className="flex justify-center items-center h-screen">
+                <IconSpinner color="text-slate-700" size="h-8 w-8" />
+                <span className="text-slate-700 ml-2">Verificando usuario y suscripción...</span>
+            </div>
+        );
+    }
+    
+    // Si la autenticación está verificada pero no hay UID efectivo 
+    if (!effectiveBarberieUid) {
+        return (
+             <div className="text-center py-12">
+                 <h2 className="text-xl font-semibold text-red-600">Acceso Denegado</h2>
+                 <p className="text-sm text-slate-500 mt-2">No se pudo identificar una barbería válida para el usuario.</p>
+             </div>
+        );
+    }
+
     return (
         <div className="space-y-6 animate-fadeIn m-2">
             
-            {/* HEADER + BUSCADOR */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div>
-                    <h2 className="text-xl font-semibold text-slate-900">Cartera de Clientes</h2>
-                    <p className="text-sm text-slate-500">
-                        {clientes.length} clientes registrados. El contador de **visitas** es la fidelidad.
-                    </p>
-                </div>
-
-                <div className="flex items-center gap-3">
-                    <div className="relative group flex-1 md:flex-none">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <IconSearch />
-                        </div>
-                        <input 
-                            type="text" 
-                            placeholder="Buscar..." 
-                            className="pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-slate-200 outline-none w-full md:w-64 transition-all"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                        />
+            {/* HEADER + BUSCADOR + FILTRO DE EMPLEADOS */}
+            <div className="flex flex-col gap-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                        <h2 className="text-xl font-semibold text-slate-900">Cartera de Clientes</h2>
+                        <p className="text-sm text-slate-500">
+                            {clientes.length} clientes registrados.
+                        </p>
                     </div>
-                    
-                    <button 
-                        onClick={() => { resetForm(); setCreateModalOpen(true); }}
-                        className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-sm active:scale-95 whitespace-nowrap"
-                    >
-                        <IconPlus />
-                        <span className="hidden sm:inline">Nuevo</span>
-                    </button>
+
+                    <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
+                        {/* BUSCADOR */}
+                        <div className="relative group flex-1 md:w-64">
+                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <IconSearch />
+                            </div>
+                            <input
+                                type="text"
+                                placeholder="Buscar cliente..."
+                                className="pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-slate-200 outline-none w-full transition-all"
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                            />
+                        </div>
+
+                        {/* ⭐ FILTRO DE EMPLEADOS (OCULTAR PARA EMPLEADOS) */}
+                        {!isEmployeeMode ? (
+                            <div className="relative flex-1 md:w-48">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                                    <IconFilter />
+                                </div>
+                                <select
+                                    value={filterEmployeeId}
+                                    onChange={(e) => setFilterEmployeeId(e.target.value)}
+                                    className="pl-10 pr-8 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-slate-200 outline-none w-full appearance-none cursor-pointer text-slate-700 font-medium"
+                                >
+                                    <option value="todos">Todos los empleados</option>
+                                    {empleados.map(e => (
+                                         <option key={e.id} value={e.id}>{e.nombre} {e.id === uid && '(Tú)'}</option>
+                                    ))}
+                                </select>
+                                <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-slate-400">
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                                </div>
+                            </div>
+                        ) : (
+                            // Mostrar una etiqueta fija o un placeholder
+                            <>
+                                
+                            </>
+                        )}
+                        
+                        {/* BOTÓN NUEVO CLIENTE */}
+                        <button
+                            onClick={() => { resetForm(); setCreateModalOpen(true); }}
+                            className="flex items-center justify-center cursor-pointer gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-sm active:scale-95 whitespace-nowrap"
+                        >
+                            <IconPlus />
+                            <span className="hidden sm:inline">Nuevo</span>
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -748,49 +1235,51 @@ export const Clientes: React.FC = () => {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {filteredClients.map((client) => {
-                        const visitasActuales = client.visitas || 0; // ⭐ Usar visitas
-                        const deudaActual = client.deuda || 0; // ⭐ Usar el nuevo campo deuda
+                        const visitasActuales = client.visitas || 0;
+                        
+                        let deudaVisible = client.deuda || 0;
+                        if (isFilteredView) {
+                            const deudasCliente = deudaPorBarbero[client.id] || {};
+                            deudaVisible = deudasCliente[filterEmployeeId] || 0;
+                        }
+
                         const esGratis = visitasActuales >= 10;
                         const porcentaje = Math.min((visitasActuales / 10) * 100, 100);
 
                         return (
-                            <div key={client.id} className={`bg-white p-4 rounded-xl border shadow-sm hover:shadow-md transition-shadow group relative overflow-hidden ${esGratis ? 'border-yellow-400/50 ring-1 ring-yellow-400/30' : (deudaActual > 0 ? 'border-red-400/50 ring-1 ring-red-400/30' : 'border-slate-200')}`}>
+                            <div key={client.id} className={`bg-white p-4 rounded-xl border shadow-sm hover:shadow-md transition-shadow group relative overflow-hidden ${esGratis ? 'border-yellow-400/50 ring-1 ring-yellow-400/30' : (deudaVisible > 0 ? 'border-red-400/50 ring-1 ring-red-400/30' : 'border-slate-200')}`}>
                                 
-                                {/* Indicador de GRATIS background */}
                                 {esGratis && (
-                                     <div className="absolute top-0 right-0 bg-yellow-400 text-yellow-900 text-[10px] font-bold px-2 py-1 rounded-bl-lg z-10">
+                                    <div className="absolute top-0 right-0 bg-yellow-400 text-yellow-900 text-[10px] font-bold px-2 py-1 rounded-bl-lg z-10">
                                          ¡CORTE GRATIS!
-                                     </div>
+                                    </div>
                                 )}
                                 
-                                {/* Indicador de DEUDA */}
-                                {deudaActual > 0 && (
-                                     <div className="absolute top-0 right-0 bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg z-10">
-                                         DEUDA: {formatCurrency(deudaActual)}
-                                     </div>
+                                {deudaVisible > 0 && (
+                                    <div className="absolute top-0 right-0 bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg z-10 flex items-center gap-1">
+                                         DEUDA: {formatCurrency(deudaVisible)}
+                                    </div>
                                 )}
 
                                 <div className="flex justify-between items-start mb-3">
                                     <div className="max-w-[80%]">
                                         <h3 className="font-semibold text-slate-900 truncate">{client.nombre}</h3>
                                         
-                                        {/* TELÉFONO + WHATSAPP LINK */}
                                         {client.telefono ? (
-                                             <a 
-                                                 // ⭐ Modificado para enviar resumen de cuenta si hay deuda
-                                                 href={getWhatsAppLinkCtaCte(client)} 
-                                                 target="_blank" 
-                                                 rel="noreferrer"
-                                                 className={`text-sm ${deudaActual > 0 ? 'text-red-500 hover:text-red-600' : 'text-emerald-600 hover:text-emerald-700'} flex items-center mt-1 font-medium transition-colors w-fit`}
-                                             >
-                                                 <IconWhatsApp />
-                                                 WhatsApp 
-                                                 {deudaActual > 0 && <span className="font-bold ml-1">(Cobrar)</span>}
-                                                 <span className="text-slate-400 font-normal ml-1 hidden sm:inline">- {client.telefono}</span>
-                                             </a>
-                                         ) : (
-                                             <p className="text-xs text-slate-400 italic mt-1">Sin teléfono</p>
-                                         )}
+                                            <a
+                                                href={getWhatsAppLinkCtaCte(client, deudaVisible)}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className={`text-sm ${deudaVisible > 0 ? 'text-red-500 hover:text-red-600' : 'text-emerald-600 hover:text-emerald-700'} flex items-center mt-1 font-medium transition-colors w-fit`}
+                                            >
+                                                <IconWhatsApp />
+                                                WhatsApp
+                                                {deudaVisible > 0 && <span className="font-bold ml-1">(Cobrar)</span>}
+                                                <span className="text-slate-400 font-normal ml-1 hidden sm:inline">- {client.telefono}</span>
+                                            </a>
+                                        ) : (
+                                            <p className="text-xs text-slate-400 italic mt-1">Sin teléfono</p>
+                                        )}
                                     </div>
                                     
                                     <div className="flex gap-1">
@@ -803,34 +1292,31 @@ export const Clientes: React.FC = () => {
                                     </div>
                                 </div>
                                 
-                                {/* ⭐ SECCIÓN CUENTA CORRIENTE Y BOTONES DE ACCIÓN */}
                                 <div className="flex flex-col gap-2 mt-3 pt-3 border-t border-slate-100">
                                     <div className="flex justify-between items-center">
-                                        <button 
+                                        <button
                                             onClick={() => openCtaCte(client)}
                                             className="text-xs font-semibold text-blue-600 hover:underline flex items-center gap-1"
                                         >
                                             <IconAccount /> Ver Cta. Cte.
                                         </button>
                                         
-                                        <button 
+                                        <button
                                             onClick={() => openFiado(client)}
-                                            className="text-xs font-bold bg-blue-100 text-blue-700 px-2.5 py-1 rounded-lg hover:bg-blue-200 transition shadow-sm active:scale-95 flex items-center gap-1"
+                                            className="px-3 py-1.5 text-xs font-bold bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition shadow-sm active:scale-95 flex items-center gap-1"
                                         >
                                             <IconCash /> Fiado (+)
                                         </button>
                                     </div>
                                     
-                                    {deudaActual > 0 && (
-                                         <div className="w-full text-center text-xs text-red-500 font-medium pt-1">
-                                             Pendiente: {formatCurrency(deudaActual)}
-                                         </div>
+                                    {deudaVisible > 0 && (
+                                            <div className="w-full text-center text-xs text-red-500 font-medium pt-1">
+                                                {isFilteredView ? 'Pendiente con Empleado:' : 'Pendiente Global:'} {formatCurrency(deudaVisible)}
+                                            </div>
                                     )}
                                 </div>
-                                {/* ⭐ FIN SECCIÓN */}
 
 
-                                {/* SECCIÓN FIDELIDAD */}
                                 <div className="mt-4 pt-3 border-t border-slate-100">
                                     <div className="flex items-center justify-between mb-1.5">
                                         <span className="text-xs font-medium text-slate-500 uppercase tracking-wide flex items-center gap-1">
@@ -841,17 +1327,15 @@ export const Clientes: React.FC = () => {
                                         </span>
                                     </div>
                                     
-                                    {/* Barra de progreso */}
                                     <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden mb-3">
-                                        <div 
+                                        <div
                                             className={`h-full transition-all duration-500 ease-out rounded-full ${esGratis ? 'bg-yellow-400' : 'bg-slate-800'}`}
                                             style={{ width: `${porcentaje}%` }}
                                         />
                                     </div>
 
-                                    {/* Botones contador */}
                                     <div className="flex items-center justify-between gap-3">
-                                        <button 
+                                        <button
                                             onClick={() => updateVisitas(client, -1)}
                                             className="flex-1 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900 text-xs font-medium transition"
                                         >
@@ -859,19 +1343,19 @@ export const Clientes: React.FC = () => {
                                         </button>
 
                                         {esGratis ? (
-                                             <button 
-                                                 onClick={() => updateVisitas(client, -10)} // Resetear
-                                                 className="flex-[2] py-1.5 rounded-lg bg-yellow-400 text-yellow-900 hover:bg-yellow-500 text-xs font-bold transition shadow-sm animate-pulse"
-                                             >
-                                                 CANJEAR
-                                             </button>
-                                         ) : (
-                                             <div className="flex-[2] text-center text-[10px] text-slate-400 font-medium">
+                                            <button
+                                                onClick={(e) => handleCanjear(client, e)}
+                                                className="flex-[2] py-1.5 rounded-lg bg-yellow-400 text-yellow-900 hover:bg-yellow-500 text-xs font-bold transition shadow-sm animate-pulse"
+                                            >
+                                                CANJEAR
+                                            </button>
+                                        ) : (
+                                            <div className="flex-[2] text-center text-[10px] text-slate-400 font-medium">
                                                  {10 - visitasActuales} para gratis
-                                             </div>
-                                         )}
+                                            </div>
+                                        )}
 
-                                        <button 
+                                        <button
                                             onClick={() => updateVisitas(client, 1)}
                                             className="flex-1 py-1.5 rounded-lg bg-slate-900 text-white hover:bg-slate-800 text-xs font-medium transition shadow-sm"
                                         >
@@ -885,9 +1369,9 @@ export const Clientes: React.FC = () => {
                     })}
                 </div>
             )}
-
+            
             {/* =========================================
-                MODAL REGISTRAR FIADO ⭐ EN CTACTE MODAL
+                MODAL REGISTRAR FIADO
             ========================================= */}
             {fiadoModalOpen && selectedClient && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm">
@@ -901,7 +1385,6 @@ export const Clientes: React.FC = () => {
                         </p>
 
                         <div className="space-y-4">
-                            {/* Seleccionar Servicio */}
                             <div>
                                 <label className="text-xs font-medium text-slate-600 mb-1 block">Servicio a Fiado</label>
                                 <select
@@ -917,58 +1400,59 @@ export const Clientes: React.FC = () => {
                                 </select>
                             </div>
                             
-                            {/* Monto del Fiado */}
                             <div>
                                 <label className="text-xs font-medium text-slate-600 mb-1 block">Monto total de la deuda</label>
                                 <div className="relative">
                                     <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 text-sm">$</span>
-                                    <input 
-                                        type="number" 
-                                        value={fiadoMonto} 
-                                        onChange={(e) => setFiadoMonto(e.target.value)} 
+                                    <input
+                                        type="number"
+                                        value={fiadoMonto}
+                                        onChange={(e) => setFiadoMonto(e.target.value)}
                                         className={`${inputClass} pl-6 font-medium text-red-700`}
-                                        placeholder="0.00" 
+                                        placeholder="0.00"
                                         min="1"
                                         disabled={isFiando}
                                     />
                                 </div>
                             </div>
                             
-                            {/* Empleado que presta el servicio */}
                             <div>
                                 <label className="text-xs font-medium text-slate-600 mb-1 block">Barbero que realiza el Servicio</label>
                                 <select
-                                    value={fiadoBarberId}
+                                    value={isEmployeeMode && loggedInEmployee ? loggedInEmployee.id : fiadoBarberId}
                                     onChange={(e) => setFiadoBarberId(e.target.value)}
                                     className={inputClass + ' cursor-pointer'}
-                                    disabled={isFiando}
+                                    disabled={isFiando || !!isEmployeeMode}
                                 >
                                     <option value="">-- Selecciona un Barbero --</option>
                                     {empleados.map((e) => (
-                                         <option key={e.id} value={e.id}>{e.nombre}</option>
+                                         <option key={e.id} value={e.id}>{e.nombre} {e.id === uid && '(Tú)'}</option>
                                     ))}
                                 </select>
+                                {isEmployeeMode && (
+                                     <p className="text-xs text-slate-500 mt-1">Asignado automáticamente a ti.</p>
+                                )}
                             </div>
 
                             <div className="flex gap-3 pt-2">
-                                <button 
+                                <button
                                     onClick={() => { setFiadoModalOpen(false); resetFormFiado(); }}
                                     className={btnSecondary}
                                     disabled={isFiando}
                                 >
                                     Cancelar
                                 </button>
-                                <button 
+                                <button
                                     onClick={handleRegistrarFiado}
                                     className={`${btnPrimary} flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700`}
-                                    disabled={isFiando || !fiadoBarberId || Number(fiadoMonto) <= 0}
+                                    disabled={isFiando || (!isEmployeeMode && !fiadoBarberId) || Number(fiadoMonto) <= 0}
                                 >
                                     {isFiando ? (
                                          <>
-                                             <IconSpinner size="h-4 w-4" />
+                                             <IconSpinner size="h-4 w-4" color="text-white" />
                                              Registrando...
                                          </>
-                                     ) : `Confirmar Fiado por ${formatCurrency(Number(fiadoMonto || 0))}`}
+                                    ) : `Confirmar Fiado por ${formatCurrency(Number(fiadoMonto || 0))}`}
                                 </button>
                             </div>
                         </div>
@@ -977,7 +1461,7 @@ export const Clientes: React.FC = () => {
             )}
 
             {/* =========================================
-                MODAL SALDAR DEUDA (INDIVIDUAL) ⭐ MODIFICADO
+                MODAL SALDAR DEUDA (INDIVIDUAL)
             ========================================= */}
             {saldarModalOpen && selectedClient && saldarTransaction && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm">
@@ -998,18 +1482,25 @@ export const Clientes: React.FC = () => {
 
                             {/* Empleado que cobra */}
                             <div>
-                                <label className="text-xs font-medium text-slate-600 mb-1 block">Empleado que Recibe el Pago (Obligatorio)</label>
-                                <select
-                                    value={saldarBarberId}
-                                    onChange={(e) => setSaldarBarberId(e.target.value)}
-                                    className={inputClass + ' cursor-pointer'}
-                                    disabled={isSaldando}
-                                >
-                                    <option value="">-- Selecciona --</option>
-                                    {empleados.map((e) => (
-                                         <option key={e.id} value={e.id}>{e.nombre}</option>
-                                    ))}
-                                </select>
+                                <label className="text-xs font-medium text-slate-600 mb-1 block">Empleado que Recibe el Pago</label>
+                                {isOwner ? (
+                                    <select
+                                        value={saldarBarberId}
+                                        onChange={(e) => setSaldarBarberId(e.target.value)}
+                                        className={inputClass + ' cursor-pointer'}
+                                        disabled={isSaldando}
+                                    >
+                                        <option value="">-- Selecciona --</option>
+                                        {empleados.map((e) => (
+                                             <option key={e.id} value={e.id}>{e.nombre}</option>
+                                        ))}
+                                    </select>
+                                ) : (
+                                    // MODO EMPLEADO: No puede cambiar el cobrador
+                                    <div className="p-2.5 bg-slate-100 text-slate-600 rounded-lg text-sm font-medium border border-slate-200">
+                                         {loggedInEmployee?.nombre || "Usuario Actual (Tú)"}
+                                    </div>
+                                )}
                             </div>
                             
                             {/* Método de Pago */}
@@ -1028,24 +1519,24 @@ export const Clientes: React.FC = () => {
                             </div>
 
                             <div className="flex gap-3 pt-2">
-                                <button 
+                                <button
                                     onClick={() => { setSaldarModalOpen(false); openCtaCte(selectedClient); }}
                                     className={btnSecondary}
                                     disabled={isSaldando}
                                 >
                                     Cancelar
                                 </button>
-                                <button 
+                                <button
                                     onClick={handleSaldarDeuda}
                                     className={`${btnPrimary} flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700`}
-                                    disabled={isSaldando || !saldarBarberId || saldarTransaction.monto <= 0}
+                                    disabled={isSaldando || (isOwner && !saldarBarberId) || saldarTransaction.monto <= 0}
                                 >
                                     {isSaldando ? (
                                          <>
-                                             <IconSpinner size="h-4 w-4" />
+                                             <IconSpinner size="h-4 w-4" color="text-white" />
                                              Saldando...
                                          </>
-                                     ) : `Confirmar Pago de ${formatCurrency(saldarTransaction.monto)}`}
+                                    ) : `Confirmar Pago de ${formatCurrency(saldarTransaction.monto)}`}
                                 </button>
                             </div>
                         </div>
@@ -1054,7 +1545,7 @@ export const Clientes: React.FC = () => {
             )}
             
             {/* =========================================
-                MODAL SALDAR DEUDA TOTAL CONFIRMATION ⭐ NUEVO
+                MODAL SALDAR DEUDA TOTAL CONFIRMATION
             ========================================= */}
             {saldarTodoModalOpen && selectedClient && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm">
@@ -1066,26 +1557,33 @@ export const Clientes: React.FC = () => {
                         <div className="space-y-4">
                             <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-center">
                                 <p className="text-sm text-emerald-700 font-medium">Monto Total a ingresar:</p>
-                                <p className="text-3xl font-bold text-emerald-800 mt-1">{formatCurrency(selectedClient.deuda)}</p>
+                                <p className="text-3xl font-bold text-emerald-800 mt-1">{formatCurrency(displayedBalance)}</p>
                                 <p className="text-xs text-emerald-500 mt-1">
-                                    Esta acción registrará un único ingreso por el total y marcará **TODOS** los fiados pendientes como pagados, reseteando la deuda.
+                                    Esta acción marcará como pagados los fiados pendientes {filterEmployeeId !== 'todos' ? 'DEL EMPLEADO SELECCIONADO' : 'DE TODOS LOS EMPLEADOS'}.
                                 </p>
                             </div>
 
                             {/* Empleado que cobra */}
                             <div>
-                                <label className="text-xs font-medium text-slate-600 mb-1 block">Empleado que Recibe el Pago (Obligatorio)</label>
-                                <select
-                                    value={saldarBarberId}
-                                    onChange={(e) => setSaldarBarberId(e.target.value)}
-                                    className={inputClass + ' cursor-pointer'}
-                                    disabled={isSaldandoTodo}
-                                >
-                                    <option value="">-- Selecciona --</option>
-                                    {empleados.map((e) => (
-                                         <option key={e.id} value={e.id}>{e.nombre}</option>
-                                    ))}
-                                </select>
+                                <label className="text-xs font-medium text-slate-600 mb-1 block">Empleado que Recibe el Pago</label>
+                                {isOwner ? (
+                                    <select
+                                        value={saldarBarberId}
+                                        onChange={(e) => setSaldarBarberId(e.target.value)}
+                                        className={inputClass + ' cursor-pointer'}
+                                        disabled={isSaldandoTodo}
+                                    >
+                                        <option value="">-- Selecciona --</option>
+                                        {empleados.map((e) => (
+                                             <option key={e.id} value={e.id}>{e.nombre}</option>
+                                        ))}
+                                    </select>
+                                ) : (
+                                    // MODO EMPLEADO: No puede cambiar el cobrador
+                                    <div className="p-2.5 bg-slate-100 text-slate-600 rounded-lg text-sm font-medium border border-slate-200">
+                                         {loggedInEmployee?.nombre || "Usuario Actual (Tú)"}
+                                    </div>
+                                )}
                             </div>
                             
                             {/* Método de Pago */}
@@ -1104,24 +1602,24 @@ export const Clientes: React.FC = () => {
                             </div>
 
                             <div className="flex gap-3 pt-2">
-                                <button 
+                                <button
                                     onClick={() => { setSaldarTodoModalOpen(false); openCtaCte(selectedClient); }}
                                     className={btnSecondary}
                                     disabled={isSaldandoTodo}
                                 >
                                     Cancelar
                                 </button>
-                                <button 
+                                <button
                                     onClick={handleSaldarDeudaTotal}
                                     className={`${btnPrimary} flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700`}
-                                    disabled={isSaldandoTodo || !saldarBarberId || selectedClient.deuda <= 0}
+                                    disabled={isSaldandoTodo || (isOwner && !saldarBarberId)}
                                 >
                                     {isSaldandoTodo ? (
                                          <>
-                                             <IconSpinner size="h-4 w-4" />
+                                             <IconSpinner size="h-4 w-4" color="text-white" />
                                              Saldando Todo...
                                          </>
-                                     ) : `Confirmar Pago Total de ${formatCurrency(selectedClient.deuda)}`}
+                                    ) : `Confirmar Pago Total de ${formatCurrency(displayedBalance)}`}
                                 </button>
                             </div>
                         </div>
@@ -1131,79 +1629,133 @@ export const Clientes: React.FC = () => {
 
 
             {/* =========================================
-                MODAL CUENTA CORRIENTE (CtaCte) ⭐ CENTRALIZADO
+                MODAL CUENTA CORRIENTE (CtaCte)
             ========================================= */}
             {ctaCteModalOpen && selectedClient && (
                 <div className="fixed inset-0 z-[65] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
                     <div className="bg-white rounded-2xl w-full max-w-lg p-6 shadow-xl animate-fadeIn max-h-[90vh] overflow-y-auto">
-                        <h3 className="text-xl font-bold text-slate-900 mb-2">
-                            Cuenta Corriente
-                        </h3>
+                        
+                        <div className="flex justify-between items-start mb-2">
+                            <h3 className="text-xl font-bold text-slate-900">
+                                Cuenta Corriente
+                            </h3>
+                            
+                            {filterEmployeeId !== 'todos' && (
+                                <span className="bg-blue-50 text-blue-600 px-2 py-1 rounded text-xs font-medium border border-blue-100">
+                                     Filtro: <b>{empleados.find(e => e.id === filterEmployeeId)?.nombre}</b>
+                                </span>
+                            )}
+                        </div>
+                        
                         <p className="text-sm text-slate-500 border-b border-slate-100 pb-3">
                             Resumen de transacciones a cuenta de: **{selectedClient.nombre}**
                         </p>
                         
-                        <div className={`mt-4 p-4 rounded-lg flex justify-between items-center ${selectedClient.deuda > 0 ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'} border`}>
+                        <div className={`mt-4 p-4 rounded-lg flex justify-between items-center ${displayedBalance > 0 ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'} border`}>
                             <span className="text-lg font-bold text-slate-800">Saldo Pendiente:</span>
-                            <span className={`text-xl font-extrabold ${selectedClient.deuda > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                                {formatCurrency(selectedClient.deuda)}
-                            </span>
+                            
+                            <div className="flex items-center gap-2">
+                                {isEditingBalance && isOwner && filterEmployeeId === 'todos' ? (
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="number"
+                                            value={manualBalanceValue}
+                                            onChange={(e) => setManualBalanceValue(e.target.value)}
+                                            className="w-24 px-2 py-1 border border-slate-300 rounded text-right font-bold text-slate-900"
+                                            autoFocus
+                                        />
+                                        <button onClick={handleUpdateManualBalance} className="p-1 bg-green-100 text-green-700 rounded hover:bg-green-200">
+                                            <IconCheck />
+                                        </button>
+                                        <button onClick={() => setIsEditingBalance(false)} className="text-xs text-slate-500 underline">
+                                            Cancelar
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-2 group">
+                                        <span className={`text-xl font-extrabold ${displayedBalance > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                                            {formatCurrency(displayedBalance)}
+                                        </span>
+                                        {isOwner && filterEmployeeId === 'todos' && (
+                                            <button
+                                                onClick={() => { setIsEditingBalance(true); setManualBalanceValue(selectedClient.deuda.toString()); }}
+                                                className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-slate-600"
+                                                title="Corregir saldo manualmente"
+                                            >
+                                                <IconEdit />
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                         
-                        {/* ⭐ BOTONES DE ACCIÓN SUPERIOR DENTRO DEL MODAL */}
+                        {/* BOTONES DE ACCIÓN SUPERIOR DENTRO DEL MODAL */}
                         <div className="flex gap-3 justify-end pt-4">
-                            <button 
+                            <button
                                 onClick={() => openFiado(selectedClient)}
                                 className="px-3 py-2 text-sm font-bold bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition shadow-sm active:scale-95 flex items-center gap-1"
                             >
                                 <IconPlus /> Registrar Fiado
                             </button>
                             
-                            {selectedClient.deuda > 0 && (
-                                <button 
-                                    onClick={() => openSaldarTodo(selectedClient)}
-                                    className="px-3 py-2 text-sm font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition shadow-sm active:scale-95 flex items-center gap-1"
-                                >
-                                    <IconCash /> Saldar Deuda TOTAL
-                                </button>
-                            )}
+                            <button
+                                onClick={() => openSaldarTodo(selectedClient)}
+                                className="px-3 py-2 text-sm font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition shadow-sm active:scale-95 flex items-center gap-1"
+                            >
+                                <IconCash /> Saldar Deuda TOTAL
+                            </button>
                         </div>
-                        {/* ⭐ FIN BOTONES SUPERIORES */}
 
 
                         <div className="mt-4 space-y-2 max-h-60 overflow-y-auto custom-scrollbar">
                             <h4 className="text-xs font-medium text-slate-600 uppercase">Historial de Transacciones (Fiado/Saldado)</h4>
-                            {ctaCteTransacciones.length > 0 ? ctaCteTransacciones.map((t, index) => {
+                            
+                            {visibleTransactions.length > 0 ? visibleTransactions.map((t, index) => {
                                 const isFiado = t.tipo === 'Fiado';
-                                const isPayment = t.tipo === 'Ingreso' && t.descripcion.startsWith("Cuenta SALDADA TOTAL de");
-                                const color = isFiado ? 'text-red-500' : (isPayment ? 'text-emerald-500' : 'text-slate-500');
-                                const sign = isFiado ? "+" : "-";
+                                const isPayment = t.tipo === 'Ingreso' && (t.descripcion.startsWith("Cuenta SALDADA TOTAL de") || t.descripcion.startsWith("Pago de Fiado"));
                                 
-                                // Determinar si el fiado está pendiente de pago
-                                const isFiadoPendiente = isFiado && !t.isSaldado;
+                                const isSaldado = t.isSaldado;
+                                
+                                let colorClass = 'text-slate-500';
+                                let statusLabel = null;
+
+                                if (isFiado) {
+                                    if (isSaldado) {
+                                        colorClass = 'text-emerald-600';
+                                        statusLabel = <span className="ml-2 px-1.5 py-0.5 text-[10px] bg-emerald-100 text-emerald-700 rounded font-bold">COBRADO</span>;
+                                    } else {
+                                        colorClass = 'text-slate-500';
+                                        statusLabel = <span className="ml-2 px-1.5 py-0.5 text-[10px] bg-slate-100 text-slate-600 border border-slate-200 rounded font-bold">PENDIENTE</span>;
+                                    }
+                                } else if (isPayment) {
+                                    colorClass = 'text-emerald-500';
+                                }
+
+                                const sign = isFiado ? "+" : "-";
+                                const isFiadoPendiente = isFiado && !isSaldado;
 
                                 return (
-                                    <div key={t.id || index} className="flex justify-between items-center border-b border-slate-50 pb-2">
+                                    <div key={t.id || index} className="flex justify-between items-center border-b border-slate-5 pb-2">
                                         <div className="flex-1">
-                                            <p className="text-sm font-medium text-slate-900">
+                                            <p className={`text-sm font-medium text-slate-900`}>
                                                 {t.descripcion}
-                                                {isFiado && t.isSaldado && <span className="ml-2 px-1 text-[10px] bg-emerald-100 text-emerald-700 rounded-md font-bold">PAGADO</span>}
+                                                {statusLabel}
                                             </p>
                                             <p className="text-xs text-slate-500">
                                                 {t.barberName} | {t.createdAt.toDate().toLocaleDateString()}
                                             </p>
                                         </div>
-                                        <div className={`text-right ${color} flex items-center gap-2`}>
+                                        <div className={`text-right ${colorClass} flex items-center gap-2`}>
                                             <div>
-                                                <p className="text-sm font-bold">
+                                                <p className={`text-sm font-bold`}>
                                                     {sign} {formatCurrency(t.monto)}
                                                 </p>
                                                 <p className="text-[10px] uppercase">
-                                                    {isFiado ? 'Deuda' : (isPayment ? `Pago (${t.metodoPago || 'N/A'})` : t.tipo)}
+                                                    {isFiado ? (isSaldado ? 'Cobrado' : 'A cobrar') : (isPayment ? `Pago (${t.metodoPago || 'N/A'})` : t.tipo)}
                                                 </p>
                                             </div>
                                             
-                                            {/* ⭐ Botón SALDAR INDIVIDUAL */}
                                             {isFiadoPendiente && (
                                                 <button
                                                     onClick={() => openSaldarTransaction(selectedClient, t)}
@@ -1213,7 +1765,6 @@ export const Clientes: React.FC = () => {
                                                 </button>
                                             )}
 
-                                            {/* ⭐ Botón de Eliminación solo para Fiado PENDIENTE */}
                                             {isFiadoPendiente && (
                                                 <button
                                                     onClick={() => { setTransactionToDeleteCtaCte(t); setDeleteCtaCteModalOpen(true); }}
@@ -1227,13 +1778,13 @@ export const Clientes: React.FC = () => {
                                     </div>
                                 );
                             }) : (
-                                <p className="text-sm text-slate-400 italic">No hay registros en la Cuenta Corriente.</p>
+                                <p className="text-sm text-slate-400 italic">No hay registros visibles en la Cuenta Corriente con este filtro.</p>
                             )}
                         </div>
                         
                         <div className="flex justify-end gap-3 pt-4 border-t border-slate-100 mt-4">
-                            <button 
-                                onClick={() => { setCtaCteModalOpen(false); setSelectedClient(null); resetForm(); }}
+                            <button
+                                onClick={closeCtaCte} // ⭐ Función de cierre limpia
                                 className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium transition"
                             >
                                 Cerrar
@@ -1244,7 +1795,7 @@ export const Clientes: React.FC = () => {
             )}
 
             {/* =========================================
-                MODAL CONFIRMAR ELIMINACIÓN CTA CTE ⭐ NUEVO
+                MODAL ELIMINAR TRANSACCIÓN CTA CTE
             ========================================= */}
             {deleteCtaCteModalOpen && transactionToDeleteCtaCte && selectedClient && (
                 <div className="fixed inset-0 z-[75] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
@@ -1252,45 +1803,38 @@ export const Clientes: React.FC = () => {
                         <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-600">
                             <IconTrash />
                         </div>
-                        <h3 className="text-lg font-semibold text-slate-900">Eliminar Fiado</h3>
-                        <p className="text-sm text-slate-500 mt-2 mb-4">
-                            ¿Estás seguro de eliminar este registro de **FIADO**?
-                            Esto **reducirá la deuda** del cliente y restará **1 visita** de fidelidad.
+                        <h3 className="text-lg font-semibold text-slate-900">¿Eliminar Fiado Pendiente?</h3>
+                        <p className="text-sm text-slate-500 mt-2 mb-6">
+                            Estás a punto de eliminar el fiado: **{transactionToDeleteCtaCte.descripcion}** por **{formatCurrency(transactionToDeleteCtaCte.monto)}**. Esto reducirá la deuda y las visitas de **{selectedClient.nombre}**.
                         </p>
                         
-                        <div className="p-3 border border-red-100 rounded-lg text-sm bg-red-50">
-                            <p className="font-semibold text-slate-900">{transactionToDeleteCtaCte.descripcion}</p>
-                            <p className="text-xs text-red-600 font-bold">Monto: {formatCurrency(transactionToDeleteCtaCte.monto)}</p>
-                            <p className="text-xs text-red-600 mt-1">Se restarán $ {formatCurrency(transactionToDeleteCtaCte.monto)} a la deuda de {selectedClient.nombre}.</p>
-                        </div>
-                        
-                        <div className="flex gap-3 pt-4">
-                            <button 
+                        <div className="flex gap-3">
+                            <button
                                 onClick={() => { setDeleteCtaCteModalOpen(false); setTransactionToDeleteCtaCte(null); }}
                                 className={btnSecondary}
                                 disabled={isDeletingCtaCte}
                             >
                                 Cancelar
                             </button>
-                            <button 
-                                onClick={handleDeleteCtaCte}
-                                className={`w-full py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 active:scale-[0.98] transition font-medium text-sm flex items-center justify-center gap-2`}
+                            <button
+                                onClick={handleDeleteCtaCte} // CORRECCIÓN 4: Uso de la función
+                                className={`w-full py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 active:scale-[0.98] transition font-medium text-sm flex items-center justify-center gap-2 ${isDeletingCtaCte ? 'opacity-50 cursor-not-allowed' : ''}`}
                                 disabled={isDeletingCtaCte}
                             >
                                 {isDeletingCtaCte ? (
-                                     <>
-                                         <IconSpinner size="h-4 w-4" />
-                                         Eliminando...
-                                     </>
-                                 ) : "Sí, Eliminar Fiado"}
+                                    <>
+                                        <IconSpinner size="h-4 w-4" color="text-white" />
+                                        Eliminando...
+                                    </>
+                                ) : "Sí, eliminar Fiado"}
                             </button>
                         </div>
                     </div>
                 </div>
             )}
-            
+
             {/* =========================================
-                MODAL CREAR / EDITAR (existente)
+                MODAL CREAR / EDITAR CLIENTE
             ========================================= */}
             {(createModalOpen || editModalOpen) && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
@@ -1300,15 +1844,27 @@ export const Clientes: React.FC = () => {
                         </h3>
                         
                         <div className="space-y-4">
+                            
+                            {/* ⭐ BOTÓN DE IMPORTAR CONTACTO (AÑADIDO AL JSX) */}
+                            {createModalOpen && isContactPickerAvailable && (
+                                <button 
+                                    onClick={handleImportContact}
+                                    type="button"
+                                    className="w-full md:hidden py-2.5 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-100 transition font-medium text-sm flex items-center justify-center gap-2 mb-4"
+                                >
+                                    <IconPhone /> Importar desde Contactos
+                                </button>
+                            )}
+
                             <div>
                                 <label className="text-xs font-medium text-slate-600 mb-1 block">Nombre completo</label>
-                                <input 
+                                <input
                                     autoFocus
-                                    type="text" 
-                                    value={nombre} 
-                                    onChange={(e) => setNombre(e.target.value)} 
+                                    type="text"
+                                    value={nombre}
+                                    onChange={(e) => setNombre(e.target.value)}
                                     className={inputClass}
-                                    placeholder="Ej. Juan Pérez" 
+                                    placeholder="Ej. Juan Pérez"
                                     disabled={isSaving}
                                 />
                             </div>
@@ -1316,83 +1872,80 @@ export const Clientes: React.FC = () => {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="text-xs font-medium text-slate-600 mb-1 block">Teléfono</label>
-                                    <input 
-                                        type="tel" 
-                                        value={telefono} 
-                                        onChange={(e) => setTelefono(e.target.value)} 
+                                    <input
+                                        type="tel"
+                                        value={telefono}
+                                        onChange={(e) => setTelefono(e.target.value)}
                                         className={inputClass}
-                                        placeholder="Ej. 11 1234 5678" 
+                                        placeholder="Ej. 11 1234 5678"
                                         disabled={isSaving}
                                     />
                                 </div>
                                 <div>
                                     <label className="text-xs font-medium text-slate-600 mb-1 block">Email (Opcional)</label>
-                                    <input 
-                                        type="email" 
-                                        value={email} 
-                                        onChange={(e) => setEmail(e.target.value)} 
+                                    <input
+                                        type="email"
+                                        value={email}
+                                        onChange={(e) => setEmail(e.target.value)}
                                         className={inputClass}
-                                        placeholder="juan@email.com" 
+                                        placeholder="juan@email.com"
                                         disabled={isSaving}
                                     />
                                 </div>
                             </div>
 
                             {!createModalOpen && (
-                                                <div>
-                                                     <label className="text-xs font-medium text-slate-600 mb-1 block">Ajuste manual de Visitas (Fidelidad)</label>
-                                                     <input 
-                                                          type="number" 
-                                                          value={visitas} // ⭐ Usar 'visitas'
-                                                          onChange={(e) => setVisitas(Number(e.target.value))} // ⭐ Usar 'visitas'
-                                                          className={inputClass}
-                                                          disabled={isSaving}
-                                                          min="0"
-                                                     />
-                                                </div>
+                                    <div>
+                                        <label className="text-xs font-medium text-slate-600 mb-1 block">Ajuste manual de Visitas (Fidelidad)</label>
+                                        <input
+                                            type="number"
+                                            value={visitas}
+                                            onChange={(e) => setVisitas(Number(e.target.value))}
+                                            className={inputClass}
+                                            disabled={isSaving}
+                                            min="0"
+                                        />
+                                    </div>
                             )}
 
                             <div>
                                 <label className="text-xs font-medium text-slate-600 mb-1 block">Notas internas</label>
-                                <textarea 
+                                <textarea
                                     rows={3}
-                                    value={notas} 
-                                    onChange={(e) => setNotas(e.target.value)} 
+                                    value={notas}
+                                    onChange={(e) => setNotas(e.target.value)}
                                     className={inputClass}
-                                    placeholder="Preferencias del cliente..." 
+                                    placeholder="Preferencias del cliente..."
                                     disabled={isSaving}
                                 />
                             </div>
 
                             <div className="flex gap-3 pt-2">
-                                <button 
+                                <button
                                     onClick={() => { setCreateModalOpen(false); setEditModalOpen(false); }}
                                     className={btnSecondary}
                                     disabled={isSaving}
                                 >
                                     Cancelar
                                 </button>
-                                <button 
+                                <button
                                     onClick={createModalOpen ? handleCreate : handleEdit}
                                     className={`${btnPrimary} flex items-center justify-center gap-2`}
-                                    disabled={isSaving} // ⭐ Bloquea el botón al guardar
+                                    disabled={isSaving}
                                 >
                                     {isSaving ? (
                                          <>
-                                             <IconSpinner size="h-4 w-4" />
+                                             <IconSpinner size="h-4 w-4" color="text-white" />
                                              Guardando...
                                          </>
-                                     ) : (createModalOpen ? "Guardar Cliente" : "Guardar Cambios")}
+                                    ) : (createModalOpen ? "Guardar Cliente" : "Guardar Cambios")}
                                 </button>
                             </div>
                         </div>
-                        </div>
+                    </div>
                 </div>
             )}
 
-            {/* =========================================
-                MODAL ELIMINAR (existente)
-            ========================================= */}
             {deleteModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
                     <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-xl animate-fadeIn text-center">
@@ -1405,24 +1958,24 @@ export const Clientes: React.FC = () => {
                         </p>
                         
                         <div className="flex gap-3">
-                            <button 
+                            <button
                                 onClick={() => setDeleteModalOpen(false)}
                                 className={btnSecondary}
                                 disabled={isDeleting}
                             >
                                 Cancelar
                             </button>
-                            <button 
+                            <button
                                 onClick={handleDelete}
                                 className={`w-full py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 active:scale-[0.98] transition font-medium text-sm flex items-center justify-center gap-2 ${isDeleting ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                disabled={isDeleting} // ⭐ Bloquea el botón al eliminar
+                                disabled={isDeleting}
                             >
                                 {isDeleting ? (
-                                     <>
-                                         <IconSpinner size="h-4 w-4" />
-                                         Eliminando...
-                                     </>
-                                 ) : "Sí, eliminar"}
+                                    <>
+                                        <IconSpinner size="h-4 w-4" color="text-white" />
+                                        Eliminando...
+                                    </>
+                                ) : "Sí, eliminar"}
                             </button>
                         </div>
                     </div>

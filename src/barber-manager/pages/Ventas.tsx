@@ -1,3 +1,4 @@
+// src/barber-manager/pages/Ventas.tsx
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import {
     collection,
@@ -12,20 +13,11 @@ import {
     query as firestoreQuery,
     increment,
     FieldValue,
+    getDoc // Importación necesaria para validación
 } from "firebase/firestore";
 import { barberDb, barberAuth } from "../services/firebaseBarber";
-// ASUMIMOS RECHARTS para la gráfica (necesita instalación: npm install recharts)
-import {
-    BarChart,
-    Bar,
-    XAxis,
-    YAxis,
-    CartesianGrid,
-    Tooltip,
-    Legend,
-    ResponsiveContainer,
-} from "recharts";
-
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { useNavigate } from "react-router-dom";
 
 // ⭐ VALOR POR DEFECTO para empleados sin prioridad (debe coincidir con Empleados.tsx)
 const DEFAULT_PRIORITY = 999;
@@ -76,14 +68,14 @@ interface Cliente {
     visitas?: number;
 }
 
-// Tipado para el resumen de totales (MODIFICADO para incluir conteos)
+// Tipado para el resumen de totales
 interface TotalsSummary {
     ingresos: number;
     gastos: number;
     comisiones: number;
     neto: number;
     countIngresos: number; // INGRESO = Venta de Servicio
-    countGastos: number;  // GASTO = Gasto de Operación
+    countGastos: number;   // GASTO = Gasto de Operación
 }
 
 // Estructura anidada para la agrupación
@@ -95,25 +87,23 @@ interface TransaccionGroup {
     };
 }
 
-// Tipado para datos de liquidación (AÑADIDO countServicios)
+// Tipado para datos de liquidación
 interface LiquidacionItem {
     barberId: string;
     totalVentas: number;
     comision: number;
     porcentaje: number;
     nombre: string;
-    countServicios: number; // ⭐ NUEVO: Cantidad de servicios realizados
+    countServicios: number;
 }
 
-// Interfaz para los datos del gráfico
-interface ChartDataPoint {
-    name: string; // Etiqueta: Día o Mes
-    Ingresos: number; // Monto o Cantidad
-    Gastos: number;   // Monto o Cantidad
+// Interfaz basada en usuariosAuth (Suscripción)
+interface UsuarioAuth {
+    id: string;
+    fechaVencimiento: Timestamp;
+    email: string;
+    activo?: boolean;
 }
-
-// Tipado para el modo del gráfico (NUEVO)
-type ChartMode = 'economic' | 'quantity';
 
 
 /* ============================================================
@@ -162,6 +152,13 @@ const IconSpinner = ({ color = 'text-blue-600' }) => (
     <svg className={`animate-spin h-8 w-8 ${color}`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    </svg>
+);
+
+// ⭐ Icono para el buscador
+const IconSearch = () => (
+    <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
     </svg>
 );
 
@@ -247,74 +244,6 @@ const CollapsibleSection: React.FC<{
 };
 
 
-// NUEVO/MODIFICADO COMPONENTE DE GRÁFICA
-const VentasChart: React.FC<{ data: ChartDataPoint[], mode: ChartMode, grouping: 'day' | 'month' }> = ({ data, mode, grouping }) => {
-    if (data.length === 0) {
-        return <div className="text-center py-4 text-slate-500 text-sm">No hay datos suficientes para generar el gráfico.</div>;
-    }
-    
-    const isEconomic = mode === 'economic';
-    const YAxisFormatter = isEconomic ? formatCurrency : (value: number) => value.toLocaleString('es-AR');
-    const YAxisLabel = isEconomic ? 'Monto ($)' : 'Cantidad (unidades)';
-    const XAxisLabel = grouping === 'day' ? 'Día (dd/mm)' : 'Mes';
-    const YDomain = isEconomic ? [0, 'auto'] : [0, 'auto']; // Para la cantidad, el 0 es importante
-
-    // Función para formatear el valor en el tooltip
-    const customTooltipFormatter = (value: number, name: string) => {
-        const formattedValue = isEconomic ? formatCurrency(value) : value.toLocaleString('es-AR');
-        const unit = isEconomic ? '' : ' unidades';
-        
-        let color = 'text-slate-900';
-        if (name === 'Ingresos' || name === 'Ventas (Servicios)') {
-            color = 'text-emerald-600';
-        } else if (name === 'Gastos') {
-            color = 'text-red-600';
-        }
-        
-        return [<span className={`${color} font-bold`}>{formattedValue}{unit}</span>, name];
-    };
-
-    return (
-        <div className="w-full h-80 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-            <h3 className="text-lg font-semibold text-slate-800 mb-4">
-                {isEconomic ? 'Comparativa Económica (Ingresos vs. Gastos)' : 'Cantidad de Transacciones (Ventas vs. Gastos)'} - Agrupado por {XAxisLabel}
-            </h3>
-            <ResponsiveContainer width="100%" height="80%">
-                <BarChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis dataKey="name" stroke="#64748b" tick={{ fontSize: 12 }} />
-                    <YAxis 
-                        tickFormatter={YAxisFormatter} 
-                        stroke="#64748b"
-                        tick={{ fontSize: 12 }}
-                        domain={YDomain as any}
-                        label={{ value: YAxisLabel, angle: -90, position: 'insideLeft', fill: '#64748b', style: { textAnchor: 'middle', fontSize: 12 } }}
-                    />
-                    <Tooltip 
-                        formatter={customTooltipFormatter as any}
-                        labelFormatter={(label) => `${XAxisLabel}: ${label}`}
-                        contentStyle={{ 
-                            backgroundColor: '#fff', 
-                            border: '1px solid #e2e8f0', 
-                            borderRadius: '8px',
-                            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
-                        }}
-                    />
-                    <Legend 
-                        wrapperStyle={{ paddingTop: '10px' }} 
-                        formatter={(value) => (
-                            <span className="text-sm text-slate-600">{value}</span>
-                        )}
-                    />
-                    <Bar dataKey="Ingresos" fill="#10b981" name={isEconomic ? "Ingresos" : "Ventas (Servicios)"} />
-                    <Bar dataKey="Gastos" fill="#ef4444" name="Gastos" />
-                </BarChart>
-            </ResponsiveContainer>
-        </div>
-    );
-};
-
-
 /* ============================================================
     FUNCIONES DE DATOS Y LÓGICA
 ============================================================ */
@@ -329,6 +258,69 @@ const getDateNDaysAgo = (n: number) => {
     const d = new Date();
     d.setDate(d.getDate() - n);
     return formatDateToInput(d);
+};
+
+/* =========================================================
+    FUNCIONES DE VALIDACIÓN DE SUSCRIPCIÓN (SILENCIOSA)
+========================================================= */
+
+const forceLogout = async (navigate: (path: string) => void) => {
+    try {
+        await signOut(barberAuth);
+    } catch (error) {
+        console.error("Error al cerrar sesión de Firebase:", error);
+    }
+    localStorage.removeItem('barberOwnerId');
+    navigate("/auth");
+};
+
+const checkSubscriptionStatus = async (barberieUid: string, navigate: (path: string) => void, db: typeof barberDb): Promise<boolean> => {
+    try {
+        // Validación contra 'usuariosAuth'
+        const ownerRef = doc(db, `usuariosAuth/${barberieUid}`);
+        const ownerSnap = await getDoc(ownerRef);
+
+        if (!ownerSnap.exists()) {
+            console.error("Documento de suscripción (usuariosAuth) no encontrado.");
+            await forceLogout(navigate);
+            return false;
+        }
+
+        const ownerData = ownerSnap.data() as UsuarioAuth;
+        
+        if (ownerData.activo === false) {
+             console.warn("Usuario marcado como inactivo en DB.");
+             await forceLogout(navigate);
+             return false;
+        }
+
+        if (!ownerData.fechaVencimiento) {
+             console.error("Fecha de vencimiento no encontrada en el documento.");
+             await forceLogout(navigate);
+             return false;
+        }
+
+        const expirationDate = ownerData.fechaVencimiento.toDate();
+        
+        // Lógica de día completo (hasta medianoche del día siguiente)
+        const deadlineDate = new Date(expirationDate);
+        deadlineDate.setDate(deadlineDate.getDate() + 1); 
+        deadlineDate.setHours(0, 0, 0, 0); 
+
+        const currentTime = new Date().getTime();
+
+        if (currentTime >= deadlineDate.getTime()) {
+            console.warn("Suscripción expirada por fecha.");
+            await forceLogout(navigate);
+            return false;
+        }
+
+        return true; 
+    } catch (error) {
+        console.error("Error al verificar la suscripción:", error);
+        await forceLogout(navigate);
+        return false;
+    }
 };
 
 
@@ -364,7 +356,7 @@ const calculateTotals = (transacciones: Transaccion[], currentOwnerUid: string |
     let ingresosCalculados = 0;
     let comisionesPagadas = 0;
     let countIngresos = 0; // NUEVO
-    let countGastos = 0;  // NUEVO
+    let countGastos = 0;   // NUEVO
     let comisionesGanadas = 0;
     
     // Calcula gastos y cuenta transacciones
@@ -430,7 +422,7 @@ const calculateTotals = (transacciones: Transaccion[], currentOwnerUid: string |
         comisiones: comisionesPagadas, 
         neto: netoCalculado,
         countIngresos, // NUEVO
-        countGastos   // NUEVO
+        countGastos    // NUEVO
     };
 };
 
@@ -443,6 +435,7 @@ const monthNames = [
     COMPONENTE PRINCIPAL DE VENTAS
 ============================================================ */
 export const Ventas: React.FC = () => {
+    const navigate = useNavigate();
     const user = barberAuth.currentUser;
     const uid = user?.uid;
 
@@ -456,6 +449,7 @@ export const Ventas: React.FC = () => {
     const [clientes, setClientes] = useState<Cliente[]>([]);
     
     const [loading, setLoading] = useState(true);
+    const [isSubscriptionChecked, setIsSubscriptionChecked] = useState(false); // ⭐ Estado de verificación
     const [modalOpen, setModalOpen] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const modalRef = useRef<HTMLDivElement>(null);
@@ -475,7 +469,6 @@ export const Ventas: React.FC = () => {
     const [selectedYear, setSelectedYear] = useState(today.getFullYear());
     const [selectedDay, setSelectedDay] = useState(today.getDate());
     
-    // ⭐ MODIFICACIÓN: Nuevo filtro 'range'
     const [filterByMode, setFilterByMode] = useState<'day' | 'month' | 'range'>('day'); 
     
     // ⭐ NUEVOS ESTADOS PARA FILTRO POR RANGO
@@ -486,9 +479,6 @@ export const Ventas: React.FC = () => {
     // ⭐ NUEVO ESTADO PARA FILTRAR POR MÉTODO DE PAGO
     const [filterPaymentMethod, setFilterPaymentMethod] = useState<PaymentMethod | 'all'>('all');
 
-    // ⭐ NUEVO ESTADO PARA EL MODO DE LA GRÁFICA
-    const [chartMode, setChartMode] = useState<ChartMode>('economic'); 
-    
     // Estados del formulario
     const [currentId, setCurrentId] = useState<string | null>(null);
     const [formMonto, setFormMonto] = useState<string>("");
@@ -509,6 +499,10 @@ export const Ventas: React.FC = () => {
     const [isCreatingClient, setIsCreatingClient] = useState(false);
     const [newClientName, setNewClientName] = useState("");
     const [newClientPhone, setNewClientPhone] = useState("");
+    
+    // ⭐ NUEVOS ESTADOS PARA BÚSQUEDA DE CLIENTE
+    const [clientSearch, setClientSearch] = useState("");
+    const [showClientSuggestions, setShowClientSuggestions] = useState(false);
 
     // Vista
     const [viewMode, setViewMode] = useState<'ventas' | 'liquidaciones'>('ventas');
@@ -556,6 +550,14 @@ export const Ventas: React.FC = () => {
         return activeBarbers.sort((a, b) => (a.prioridad || DEFAULT_PRIORITY) - (b.prioridad || DEFAULT_PRIORITY));
 
     }, [empleados, isEmployeeMode, uid]);
+
+    // ⭐ FILTRADO DE CLIENTES PARA AUTOCOMPLETE
+    const filteredClientes = useMemo(() => {
+        if (!clientSearch) return clientes; 
+        return clientes.filter(c => 
+            c.nombre.toLowerCase().includes(clientSearch.toLowerCase())
+        );
+    }, [clientes, clientSearch]);
 
 
     /* ============================================================
@@ -625,19 +627,72 @@ export const Ventas: React.FC = () => {
         setLoading(false);
     }, [effectiveBarberieUid]); 
 
+
     useEffect(() => {
-        if (effectiveBarberieUid) {
-            loadTransacciones();
-        }
-    }, [effectiveBarberieUid, loadTransacciones]);
+        const unsubscribe = onAuthStateChanged(barberAuth, async (user) => {
+             if (user) {
+                 const effectiveBarberieUid = localStorage.getItem('barberOwnerId') || user.uid;
+                 
+                 if (effectiveBarberieUid) {
+                    const isSubscriptionValid = await checkSubscriptionStatus(effectiveBarberieUid, navigate, barberDb);
+                    
+                    if (!isSubscriptionValid) {
+                        setLoading(false);
+                        setIsSubscriptionChecked(true); 
+                        return;
+                    }
+                    
+                    loadTransacciones();
+                    setIsSubscriptionChecked(true); 
+                 } else {
+                     setLoading(false);
+                     setIsSubscriptionChecked(true); 
+                 }
+
+             } else {
+                 setLoading(false);
+                 setIsSubscriptionChecked(true); 
+             }
+        });
+
+        return () => unsubscribe();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [navigate, barberDb]); 
 
 
     // ============================================================
     // LÓGICA DE FILTRADO Y RESÚMENES
     // ============================================================
 
-    const allFilteredTransacciones = useMemo(() => {
-        let currentFiltered = transacciones;
+    // 1. TRANSACCIONES BASE (Filtradas solo por Barbero/Método de Pago)
+    // Se usan para la LISTA (para que no desaparezcan items al cambiar fecha)
+    const baseFilteredTransacciones = useMemo(() => {
+        let filtered = transacciones;
+        
+        if (isEmployeeMode) {
+             filtered = filtered.filter(t => t.barberId === loggedInEmployee?.id);
+        }
+        
+        // Filtro de Barbero
+        if (viewMode === 'ventas' && !isEmployeeMode && filterBarberId !== 'all') {
+             filtered = filtered.filter(t => t.barberId === filterBarberId);
+        }
+
+        // Filtro de Método de Pago
+        if (viewMode === 'ventas' && filterPaymentMethod !== 'all') {
+             filtered = filtered.filter(t => 
+                 (t.tipo === 'Gasto' && filterPaymentMethod === 'N/A') || 
+                 (t.tipo === 'Ingreso' && t.metodoPago === filterPaymentMethod)
+             );
+        }
+        
+        return filtered;
+    }, [transacciones, filterBarberId, isEmployeeMode, loggedInEmployee?.id, filterPaymentMethod, viewMode]);
+
+    // 2. TRANSACCIONES PARA TOTALES (Filtradas TAMBIÉN por Tiempo)
+    // Se usan solo para la TARJETA SUPERIOR de Resumen
+    const timeFilteredTransacciones = useMemo(() => {
+        let currentFiltered = baseFilteredTransacciones;
 
         if (filterByMode === 'month') {
             currentFiltered = currentFiltered.filter(t => {
@@ -653,49 +708,24 @@ export const Ventas: React.FC = () => {
                  return tYear === selectedYear && tMonth === selectedMonth && tDay === selectedDay;
              });
         } else if (filterByMode === 'range') {
-             // ⭐ FILTRO POR RANGO DE FECHAS (MODO RANGE)
              const start = startDate;
              const end = endDate;
-
              currentFiltered = currentFiltered.filter(t => {
-                 // t.date tiene formato 'YYYY-MM-DD' y es comparable directamente
                  return t.date >= start && t.date <= end;
              });
         }
         
         return currentFiltered;
 
-    }, [transacciones, selectedYear, selectedMonth, selectedDay, filterByMode, startDate, endDate]); 
-
-    const finalDisplayedTransacciones = useMemo(() => {
-        let filtered = allFilteredTransacciones;
-        
-        if (isEmployeeMode) {
-             filtered = filtered.filter(t => t.barberId === loggedInEmployee?.id);
-        }
-        
-        // ⭐ Filtro de Barbero: SOLO APLICA EN MODO 'ventas' Y SI NO ES EMPLEADO
-        if (viewMode === 'ventas' && !isEmployeeMode && filterBarberId !== 'all') {
-             filtered = filtered.filter(t => t.barberId === filterBarberId);
-        }
-
-        // ⭐ Filtro de Método de Pago: SOLO APLICA EN MODO 'ventas'
-        if (viewMode === 'ventas' && filterPaymentMethod !== 'all') {
-             filtered = filtered.filter(t => 
-                 (t.tipo === 'Gasto' && filterPaymentMethod === 'N/A') || 
-                 (t.tipo === 'Ingreso' && t.metodoPago === filterPaymentMethod)
-             );
-        }
-        
-        return filtered;
-    }, [allFilteredTransacciones, filterBarberId, isEmployeeMode, loggedInEmployee?.id, filterPaymentMethod, viewMode]);
+    }, [baseFilteredTransacciones, selectedYear, selectedMonth, selectedDay, filterByMode, startDate, endDate]); 
 
 
     const groupedTransacciones = useMemo(() => {
         // En vista 'liquidaciones', no agrupamos, en vista 'ventas' sí.
-        const transaccionesToGroup = viewMode === 'ventas' ? finalDisplayedTransacciones : [];
+        // ⭐ USAMOS LAS TRANSACCIONES BASE (Sin filtrar por tiempo)
+        const transaccionesToGroup = viewMode === 'ventas' ? baseFilteredTransacciones : [];
         return groupTransaccionesByDate(transaccionesToGroup);
-    }, [finalDisplayedTransacciones, viewMode]);
+    }, [baseFilteredTransacciones, viewMode]);
     
     const availableYears = useMemo(() => {
         const years = new Set(transacciones.map(t => Number(t.date.substring(0, 4))));
@@ -715,11 +745,12 @@ export const Ventas: React.FC = () => {
                 comision: 0,
                 porcentaje: emp.porcentaje,
                 nombre: emp.nombre,
-                countServicios: 0 // ⭐ Inicializar
+                countServicios: 0 
             };
         });
 
-        allFilteredTransacciones.filter(t => t.tipo === 'Ingreso' && t.barberId)
+        // Para liquidaciones, usamos el filtro de TIEMPO también, porque se paga por periodo.
+        timeFilteredTransacciones.filter(t => t.tipo === 'Ingreso' && t.barberId)
             .forEach(t => {
                 const monto = t.monto;
                 const empId = t.barberId!;
@@ -734,7 +765,7 @@ export const Ventas: React.FC = () => {
                 if (liquidaciones[empId]) {
                     liquidaciones[empId].totalVentas += monto;
                     liquidaciones[empId].comision += monto * (porcentajeFijo / 100);
-                    liquidaciones[empId].countServicios += 1; // ⭐ Contar cada ingreso
+                    liquidaciones[empId].countServicios += 1; 
                 }
             });
 
@@ -742,17 +773,18 @@ export const Ventas: React.FC = () => {
             .filter(data => data.totalVentas > 0)
             .sort((a, b) => a.nombre.localeCompare(b.nombre));
 
-    }, [allFilteredTransacciones, empleados, isEmployeeMode]);
+    }, [timeFilteredTransacciones, empleados, isEmployeeMode]);
     
     const employeeLiquidacion = useMemo(() => {
         if (!isEmployeeMode || !uid || !loggedInEmployee) return null;
         
-        const employeeSales = allFilteredTransacciones.filter(t => t.barberId === loggedInEmployee.id && t.tipo === 'Ingreso');
-        const employeeExpenses = allFilteredTransacciones.filter(t => t.barberId === loggedInEmployee.id && t.tipo === 'Gasto');
+        // Para mi liquidación, también respeto el filtro de tiempo
+        const employeeSales = timeFilteredTransacciones.filter(t => t.barberId === loggedInEmployee.id && t.tipo === 'Ingreso');
+        const employeeExpenses = timeFilteredTransacciones.filter(t => t.barberId === loggedInEmployee.id && t.tipo === 'Gasto');
         
         const totalVentas = employeeSales.reduce((sum, t) => sum + t.monto, 0);
         const totalGastos = employeeExpenses.reduce((sum, t) => sum + t.monto, 0);
-        const countServicios = employeeSales.length; // ⭐ Cantidad de servicios
+        const countServicios = employeeSales.length; 
         
         const comisionGanada = employeeSales.reduce((sum, t) => {
             let porcentajeFijo = t.comisionAplicada ?? 0;
@@ -775,125 +807,23 @@ export const Ventas: React.FC = () => {
             porcentaje,
             neto,
             nombre: loggedInEmployee.nombre,
-            countServicios // ⭐ Añadir al resumen de empleado
+            countServicios 
         };
 
-    }, [allFilteredTransacciones, isEmployeeMode, uid, loggedInEmployee]);
+    }, [timeFilteredTransacciones, isEmployeeMode, uid, loggedInEmployee]);
 
 
     const totalSummary = useMemo(() => {
-        return calculateTotals(allFilteredTransacciones, effectiveBarberieUid, empleados, !!isEmployeeMode); 
+        // El resumen de totales SI obedece al filtro de tiempo
+        return calculateTotals(timeFilteredTransacciones, effectiveBarberieUid, empleados, !!isEmployeeMode); 
 
-    }, [allFilteredTransacciones, isEmployeeMode, effectiveBarberieUid, empleados]);
-
-    /* ============================================================
-        LÓGICA DE DATOS PARA LA GRÁFICA (MODIFICADO POR REQUISITOS)
-    ============================================================ */
-    // ⭐ Implementación del requisito:
-    // - Si el filtro es 'day' o 'range', agrupa por día (máx 12 días).
-    // - Si el filtro es 'month' (y selectedMonth no es 0/Todo el Año), agrupa por día (máx 12 días).
-    // - Si el filtro es 'month' y selectedMonth es 0/Todo el Año, o si estamos en vista de liquidaciones, agrupa por mes (máx 12 meses).
-    const chartGroupingLevel = useMemo(() => {
-        if (filterByMode === 'day' || filterByMode === 'range') {
-            return 'day';
-        }
-        if (filterByMode === 'month' && selectedMonth !== 0) {
-            return 'day'; // Requisito: Si se selecciona un mes, mostrar por días.
-        }
-        return 'month'; // Por defecto (Todo el Año o Liquidaciones)
-    }, [filterByMode, selectedMonth]);
-
-    const chartData = useMemo(() => {
-        
-        const groupingLevel = chartGroupingLevel; // Usamos el nivel de agrupación calculado
-        
-        // Determina la fuente de transacciones (usamos las filtradas por tiempo, no por barbero/método)
-        const transaccionesToChart = allFilteredTransacciones;
-        
-        // 2. Agrega los datos
-        const aggregatedData: { 
-            [key: string]: { 
-                Ingresos: number, // Economic / Quantity
-                Gastos: number,   // Economic / Quantity
-                OriginalDateKey: string // Para un ordenamiento preciso (YYYY-MM-DD o YYYY-MM)
-            } 
-        } = {};
-
-        transaccionesToChart.forEach(t => {
-            let key = '';
-            let sortKey = t.date;
-
-            const [year, month, day] = t.date.split('-');
-
-            if (groupingLevel === 'month') {
-                key = monthNames[Number(month) - 1]; // Enero
-                sortKey = `${year}-${month.padStart(2, '0')}-99`; // YYYY-MM-99 para ordenar correctamente
-            } else { // 'day' grouping
-                key = `${Number(day).toString().padStart(2, '0')}/${Number(month).toString().padStart(2, '0')}`; // 04/12
-                sortKey = t.date; // YYYY-MM-DD
-            }
-
-            if (!aggregatedData[key]) {
-                aggregatedData[key] = { 
-                    Ingresos: 0, 
-                    Gastos: 0, 
-                    OriginalDateKey: sortKey 
-                };
-            }
-
-            // --- Agregación de Métrica ---
-            if (chartMode === 'economic') {
-                if (t.tipo === 'Ingreso') {
-                    // Si es Empleado, usa la comisión. Si es Dueño, usa el ingreso bruto.
-                    let incomeAmount = t.monto;
-                    if (isEmployeeMode && loggedInEmployee && t.barberId === loggedInEmployee.id) { // Solo cuenta la comisión si es suya
-                         let porcentajeFijo = t.comisionAplicada ?? loggedInEmployee.porcentaje;
-                         incomeAmount = t.monto * (porcentajeFijo / 100);
-                    } else if (isEmployeeMode && t.barberId !== loggedInEmployee?.id) {
-                         // Si es empleado y la venta no es suya, no cuenta nada.
-                         incomeAmount = 0;
-                    }
-                    aggregatedData[key].Ingresos += incomeAmount;
-                } else if (t.tipo === 'Gasto') {
-                    // Si es empleado, solo cuenta gastos propios. Si es dueño, cuenta todos.
-                    if (!isEmployeeMode || t.barberId === loggedInEmployee?.id || !t.barberId) {
-                         aggregatedData[key].Gastos += t.monto;
-                    }
-                }
-            } else { // Quantity mode
-                if (t.tipo === 'Ingreso') {
-                    if (!isEmployeeMode || t.barberId === loggedInEmployee?.id) {
-                         aggregatedData[key].Ingresos += 1; // Conteo de Ventas/Servicios
-                    }
-                } else if (t.tipo === 'Gasto') {
-                    if (!isEmployeeMode || t.barberId === loggedInEmployee?.id || !t.barberId) {
-                         aggregatedData[key].Gastos += 1; // Conteo de Gastos
-                    }
-                }
-            }
-        });
-
-        // 3. Convierte a array y ordena
-        const chartDataArray = Object.entries(aggregatedData)
-            .map(([name, values]) => ({
-                name: name,
-                Ingresos: Math.round(values.Ingresos),
-                Gastos: Math.round(values.Gastos),
-                OriginalDateKey: values.OriginalDateKey
-            }))
-            .sort((a, b) => a.OriginalDateKey.localeCompare(b.OriginalDateKey));
-
-        // Limita a 12 puntos (12 días o 12 meses)
-        return chartDataArray.slice(-12);
-
-    }, [allFilteredTransacciones, chartGroupingLevel, isEmployeeMode, loggedInEmployee, chartMode]);
+    }, [timeFilteredTransacciones, isEmployeeMode, effectiveBarberieUid, empleados]);
 
 
     /* ============================================================
         GESTIÓN DE MODAL Y FORMULARIO
     ============================================================ */
     
-    // ⭐ CORRECCIÓN: Definición de resetForm sin argumentos. Usa servicios, empleados, etc., del ámbito.
     const resetForm = useCallback(() => {
         setCurrentId(null);
         setFormMonto("");
@@ -902,30 +832,32 @@ export const Ventas: React.FC = () => {
         setFormDate(formatDateToInput(new Date())); 
         setFormMetodoPago('Efectivo'); 
         
-        // ⭐ Priorizar 'servicio' si hay servicios.
         const hasServices = servicios.length > 0;
         setVentaType(hasServices ? 'servicio' : 'manual');
         
         const defaultServiceId = servicios[0]?.id || '';
         setSelectedServiceId(defaultServiceId);
 
-        // ⭐ Lógica de preselección usando sortedBarbers
+        // Lógica de preselección usando sortedBarbers
         const firstBarber = sortedBarbers[0];
         const me = sortedBarbers.find(e => e.id === uid);
 
         if (isEmployeeMode && me) {
-             setSelectedBarberId(me.id); // Si soy empleado, me preselecciono
+             setSelectedBarberId(me.id); 
         } else if (firstBarber) {
-             setSelectedBarberId(firstBarber.id); // Si soy dueño o no soy empleado, selecciono el primero de la lista ordenada
+             setSelectedBarberId(firstBarber.id); 
         } else {
              setSelectedBarberId('');
         }
         
-        // Reset Cliente y Creación
         setSelectedClienteId('');
         setIsCreatingClient(false);
         setNewClientName("");
         setNewClientPhone("");
+        
+        // ⭐ Reset de búsqueda
+        setClientSearch("");
+        setShowClientSuggestions(false);
 
         const defaultService = servicios.find(s => s.id === defaultServiceId);
         if (hasServices && defaultService) {
@@ -934,7 +866,7 @@ export const Ventas: React.FC = () => {
         }
         
         setIsEditing(false);
-    }, [servicios, uid, isEmployeeMode, sortedBarbers]); // Añadir dependencias explícitamente
+    }, [servicios, uid, isEmployeeMode, sortedBarbers]);
 
     const openModal = (transaccion?: Transaccion) => {
         if (transaccion) {
@@ -953,10 +885,18 @@ export const Ventas: React.FC = () => {
             
             // Cargar cliente si existe
             setSelectedClienteId(transaccion.clienteId || '');
+            
+            // ⭐ Si estamos editando y hay cliente, prellenar el buscador
+            if (transaccion.clienteId) {
+                const currentClient = clientes.find(c => c.id === transaccion.clienteId);
+                setClientSearch(currentClient ? currentClient.nombre : "");
+            } else {
+                setClientSearch("");
+            }
+
             setIsCreatingClient(false); 
 
         } else {
-            // ⭐ CORRECCIÓN: Llamada a resetForm sin argumentos.
             resetForm();
         }
         setModalOpen(true);
@@ -964,7 +904,6 @@ export const Ventas: React.FC = () => {
 
     const closeModal = useCallback(() => {
         setModalOpen(false);
-        // ⭐ CORRECCIÓN: Llamada a resetForm sin argumentos.
         resetForm(); 
     }, [resetForm]);
 
@@ -1017,32 +956,31 @@ export const Ventas: React.FC = () => {
     }, [ventaType, selectedServiceId, servicios, formTipo, isEditing, formMonto]);
 
 
-    /* ============================================================
-        CRUD HANDLERS
-    ============================================================ */
     const handleSave = async () => {
-        if (isSaving) return; // Previene doble click
+        const userUid = user?.uid; // Usar user?.uid
+        const effectiveUid = localStorage.getItem('barberOwnerId') || userUid;
+        if (!effectiveUid || isSaving) return; 
         
-        if (!uid || !formMonto || !formDescripcion.trim() || !formDate) {
-            console.error("Completa todos los campos.");
-            return;
+        if (!formMonto || !formDescripcion.trim() || !formDate) return alert("Completa todos los campos.");
+        
+        // ----------------------------------------------------------------------------------
+        // ⭐ CORRECCIÓN APLICADA AQUÍ: Reemplazado 'formBarberId' por 'selectedBarberId'
+        // ----------------------------------------------------------------------------------
+        if (formTipo === 'Ingreso' && !selectedBarberId) {
+             return alert("Debe seleccionar un Barbero para registrar una Venta.");
         }
-        
-        if (formTipo === 'Ingreso' && (!selectedBarberId || !formMetodoPago)) {
-            console.error("Debes seleccionar un empleado y método de pago para esta venta.");
-            return;
+        // ----------------------------------------------------------------------------------
+
+        if (formTipo === 'Ingreso' && !formMetodoPago) {
+             return alert("Debe seleccionar un Método de Pago.");
         }
 
-        if (formTipo === 'Ingreso' && isCreatingClient && !newClientName.trim()) {
-            console.error("Por favor ingresa el nombre del nuevo cliente.");
-            return;
+        if (isCreatingClient && !newClientName.trim()) {
+             return alert("Por favor ingresa el nombre del nuevo cliente.");
         }
-
+        
         const montoNum = Number(formMonto);
-        if (isNaN(montoNum) || montoNum <= 0) {
-            console.error("El monto debe ser un número positivo.");
-            return;
-        }
+        if (isNaN(montoNum) || montoNum <= 0) return alert("El monto debe ser un número positivo.");
         
         let barberIdToSave: string | null = null;
         let barberNameToSave: string | null = null;
@@ -1091,7 +1029,7 @@ export const Ventas: React.FC = () => {
             }
         }
         
-        setIsSaving(true); // ⭐ BLOQUEAR EL BOTÓN
+        setIsSaving(true); 
         
         try {
             const data: Partial<Transaccion> = {
@@ -1118,7 +1056,7 @@ export const Ventas: React.FC = () => {
                     createdAt: serverTimestamp(),
                 });
 
-                // --- ⭐ LÓGICA DE FIDELIDAD (+1 Visita) ---
+                // --- LÓGICA DE FIDELIDAD (+1 Visita) ---
                 if (clienteIdToSave) {
                     try {
                         const clientRef = doc(barberDb, `barber_users/${effectiveBarberieUid}/clientes/${clienteIdToSave}`);
@@ -1130,7 +1068,6 @@ export const Ventas: React.FC = () => {
                         console.error("Error actualizando fidelidad:", fidelityError);
                     }
                 }
-                // --- ⭐ FIN LÓGICA FIDELIDAD ⭐ ---
             }
 
             closeModal();
@@ -1139,7 +1076,7 @@ export const Ventas: React.FC = () => {
             console.error(e);
             console.error("Error al guardar la transacción.");
         } finally {
-             setIsSaving(false); // ⭐ DESBLOQUEAR EL BOTÓN
+             setIsSaving(false); 
         }
     };
 
@@ -1153,9 +1090,9 @@ export const Ventas: React.FC = () => {
     };
     
     const handleDelete = async () => {
-        if (!effectiveBarberieUid || !transactionToDelete || isDeleting) return; // Previene doble click
+        if (!effectiveBarberieUid || !transactionToDelete || isDeleting) return; 
         
-        setIsDeleting(true); // ⭐ BLOQUEAR EL BOTÓN
+        setIsDeleting(true); 
         
         try {
             await deleteDoc(doc(barberDb, `barber_users/${effectiveBarberieUid}/ventas/${transactionToDelete.id}`));
@@ -1166,7 +1103,7 @@ export const Ventas: React.FC = () => {
             console.error(e);
             console.error("Error al eliminar la transacción.");
         } finally {
-            setIsDeleting(false); // ⭐ DESBLOQUEAR EL BOTÓN
+            setIsDeleting(false); 
         }
     };
 
@@ -1217,22 +1154,22 @@ export const Ventas: React.FC = () => {
                     <div>
                         <p className="text-sm font-medium text-slate-900">{t.descripcion}</p>
                         <div className="flex flex-wrap gap-2 items-center mt-0.5">
-                             {t.createdAt && (
-                                 <p className="text-xs text-slate-400">
+                            {t.createdAt && (
+                                <p className="text-xs text-slate-400">
                                      {t.createdAt instanceof Timestamp ? t.createdAt.toDate().toLocaleTimeString("es-AR", { hour: '2-digit', minute: '2-digit' }) : "Cargando..."}
-                                 </p>
+                                </p>
                             )}
                             {/* Mostrar Cliente si existe */}
                             {t.clienteNombre && (
-                                 <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">
+                                <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">
                                      Cliente: {t.clienteNombre}
-                                 </span>
+                                </span>
                             )}
                             {/* ⭐ MOSTRAR MÉTODO DE PAGO */}
                             {t.metodoPago && t.tipo === 'Ingreso' && (
-                                 <span className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                <span className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded flex items-center gap-1">
                                      <PaymentMethodIcon method={t.metodoPago} /> {t.metodoPago}
-                                 </span>
+                                </span>
                             )}
                         </div>
                         
@@ -1274,6 +1211,15 @@ export const Ventas: React.FC = () => {
             </div>
         );
     };
+
+    if (!isSubscriptionChecked) {
+        return (
+            <div className="flex justify-center items-center h-screen">
+                <IconSpinner color="text-slate-700" />
+                <span className="text-slate-700 ml-2">Verificando suscripción...</span>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6 animate-fadeIn m-2">
@@ -1361,8 +1307,6 @@ export const Ventas: React.FC = () => {
                         setViewMode('ventas'); 
                         setFilterBarberId('all'); 
                         setFilterPaymentMethod('all'); 
-                        // Mantenemos el filtro de modo para que el usuario pueda volver rápidamente
-                        // El cálculo de los estados de día/mes/rango se hace en el useMemo si es necesario.
                     }} 
                     className={`py-2 px-4 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                         viewMode === 'ventas' ? 'bg-slate-800 text-white' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
@@ -1377,8 +1321,6 @@ export const Ventas: React.FC = () => {
                             setViewMode('liquidaciones'); 
                             setFilterBarberId('all'); 
                             setFilterPaymentMethod('all'); 
-                            // REQUISITO: Al ver Liquidaciones, el período se hereda del filtro actual.
-                            // No es necesario forzar a 'month', se mantiene el filtro.
                         }} 
                         className={`py-2 px-4 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                             viewMode === 'liquidaciones' ? 'bg-emerald-700 text-white' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
@@ -1411,6 +1353,7 @@ export const Ventas: React.FC = () => {
                                 setFilterByMode('month'); 
                                 setSelectedDay(0); // Día 0 para indicar "todo el mes/año" en el filtro
                                 setSelectedMonth(today.getMonth() + 1);
+                                setSelectedYear(today.getFullYear());
                             }} 
                             className={`py-1.5 px-3 text-xs font-medium transition-colors cursor-pointer ${
                                 filterByMode === 'month' ? 'bg-slate-800 text-white' : 'text-slate-700 hover:bg-slate-100'
@@ -1554,7 +1497,7 @@ export const Ventas: React.FC = () => {
                         <div className="flex items-center gap-2 mb-4 text-sm text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-100">
                              <IconAlert /> 
                              <p>
-                                Este resumen muestra el **Total de Ventas** y la **Comisión Fija** para el período seleccionado ({filterByMode === 'month' && selectedMonth === 0 ? 'Todo el año' : filterByMode === 'month' ? monthNames[selectedMonth - 1] : filterByMode === 'day' ? `Día ${selectedDay}/${selectedMonth}` : `Rango ${startDate} a ${endDate}`}).
+                                 Este resumen muestra el **Total de Ventas** y la **Comisión Fija** para el período seleccionado ({filterByMode === 'month' && selectedMonth === 0 ? 'Todo el año' : filterByMode === 'month' ? monthNames[selectedMonth - 1] : filterByMode === 'day' ? `Día ${selectedDay}/${selectedMonth}` : `Rango ${startDate} a ${endDate}`}).
                              </p>
                         </div>
                         
@@ -1575,26 +1518,26 @@ export const Ventas: React.FC = () => {
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {liquidacionDataOwner.map((data, index) => (
                                     <div key={index} className="bg-emerald-50 p-4 rounded-lg border border-emerald-200">
-                                        <p className="text-sm font-semibold text-slate-900">{data.nombre}</p>
-                                        {/* Muestra el porcentaje actual para fines informativos */}
-                                        <p className="text-xs text-slate-500 mt-1">Comisión: {data.porcentaje}%</p>
-                                        
-                                        <div className="mt-3 pt-3 border-t border-emerald-100 space-y-1">
-                                            <div className="flex justify-between text-sm">
-                                                <span>Ventas Totales:</span>
-                                                <span className="font-medium text-slate-700">{formatCurrency(data.totalVentas)}</span>
+                                            <p className="text-sm font-semibold text-slate-900">{data.nombre}</p>
+                                            {/* Muestra el porcentaje actual para fines informativos */}
+                                            <p className="text-xs text-slate-500 mt-1">Comisión: {data.porcentaje}%</p>
+                                            
+                                            <div className="mt-3 pt-3 border-t border-emerald-100 space-y-1">
+                                                <div className="flex justify-between text-sm">
+                                                    <span>Ventas Totales:</span>
+                                                    <span className="font-medium text-slate-700">{formatCurrency(data.totalVentas)}</span>
+                                                </div>
+                                                {/* ⭐ MOSTRAR CANTIDAD DE SERVICIOS */}
+                                                <div className="flex justify-between text-xs text-slate-500">
+                                                     <span>Servicios Realizados:</span>
+                                                     <span className="font-semibold">{data.countServicios}</span>
+                                                </div>
+                                                {/* FIN MOSTRAR CANTIDAD DE SERVICIOS */}
+                                                <div className="flex justify-between text-lg mt-1 font-bold text-emerald-800">
+                                                    <span>A Liquidar (Comisión):</span>
+                                                    <span>{formatCurrency(data.comision)}</span>
+                                                </div>
                                             </div>
-                                            {/* ⭐ MOSTRAR CANTIDAD DE SERVICIOS */}
-                                            <div className="flex justify-between text-xs text-slate-500">
-                                                 <span>Servicios Realizados:</span>
-                                                 <span className="font-semibold">{data.countServicios}</span>
-                                            </div>
-                                            {/* FIN MOSTRAR CANTIDAD DE SERVICIOS */}
-                                            <div className="flex justify-between text-lg mt-1 font-bold text-emerald-800">
-                                                <span>A Liquidar (Comisión):</span>
-                                                <span>{formatCurrency(data.comision)}</span>
-                                            </div>
-                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -1606,11 +1549,11 @@ export const Ventas: React.FC = () => {
                             <IconSpinner color="text-blue-600" />
                             <p className="mt-2 text-sm text-slate-500">Cargando transacciones...</p>
                         </div>
-                    ) : finalDisplayedTransacciones.length === 0 ? (
+                    ) : baseFilteredTransacciones.length === 0 ? (
                         <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 border-dashed">
                             <IconAlert />
                             <p className="text-slate-400 mb-2 mt-4">
-                                No se encontraron transacciones para el periodo seleccionado.
+                                No se encontraron transacciones para el filtro seleccionado.
                             </p>
                             <button onClick={() => openModal()} className="text-sm cursor-pointer text-slate-900 font-medium hover:underline">
                                 Registrar una nueva ahora
@@ -1631,7 +1574,7 @@ export const Ventas: React.FC = () => {
                                      <span className={`text-base font-bold ${yearTotals.neto >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                                          {isEmployeeMode ? 'Neto Liquidable' : 'Neto Real'}: {formatCurrency(yearTotals.neto)}
                                      </span>
-                                 );
+                                    );
 
                                 return (
                                     <CollapsibleSection 
@@ -1651,7 +1594,7 @@ export const Ventas: React.FC = () => {
                                                      <span className={`text-sm font-semibold ${monthTotals.neto >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                                                          {formatCurrency(monthTotals.neto)}
                                                      </span>
-                                                 );
+                                                    );
 
                                                 return (
                                                     <CollapsibleSection 
@@ -1668,10 +1611,10 @@ export const Ventas: React.FC = () => {
                                                                 const dayTotals = calculateTotals(dailyTransacciones, effectiveBarberieUid, empleados, !!isEmployeeMode);
                                                                 
                                                                 const daySummary = (
-                                                                     <span className={`text-xs font-medium ${dayTotals.neto >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
-                                                                         {formatCurrency(dayTotals.neto)}
-                                                                     </span>
-                                                                 );
+                                                                        <span className={`text-xs font-medium ${dayTotals.neto >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                                                                            {formatCurrency(dayTotals.neto)}
+                                                                        </span>
+                                                                    );
 
                                                                 return (
                                                                     <CollapsibleSection 
@@ -1699,33 +1642,6 @@ export const Ventas: React.FC = () => {
                 )}
                 {/* FIN VISTA DE CONTENIDO */}
 
-                {/* GRÁFICA XY (POSICIÓN 2: DEBAJO DEL HISTORIAL) */}
-                {!loading && chartData.length > 0 && (
-                    <>
-                        <div className="flex justify-end gap-3 items-center text-sm">
-                            <span className="text-slate-600 font-medium">Métrica de Gráfica:</span>
-                            <button
-                                onClick={() => setChartMode('economic')}
-                                className={`py-1 px-3 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                                    chartMode === 'economic' ? 'bg-slate-800 text-white' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
-                                }`}
-                            >
-                                Económico ($)
-                            </button>
-                            <button
-                                onClick={() => setChartMode('quantity')}
-                                className={`py-1 px-3 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                                    chartMode === 'quantity' ? 'bg-slate-800 text-white' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
-                                }`}
-                            >
-                                Cantidad (Ventas/Gastos)
-                            </button>
-                        </div>
-                        <VentasChart data={chartData} mode={chartMode} grouping={chartGroupingLevel} />
-                    </>
-                )}
-                {/* FIN GRÁFICA XY */}
-
                 {/* MODAL CREAR / EDITAR */}
                 {modalOpen && (
                      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
@@ -1735,289 +1651,327 @@ export const Ventas: React.FC = () => {
                                 onClick={(e) => e.stopPropagation()}
                           >
                                <h3 className="text-lg font-semibold text-slate-900 mb-4">
-                                     {isEditing ? "Editar Transacción" : "Nueva Venta Rápida"}
+                                    {isEditing ? "Editar Transacción" : "Nueva Venta Rápida"}
                                </h3>
-                                
+                               
                                <div className="space-y-4">
-                                     
-                                     {/* Tipo de Transacción */}
-                                     <div>
-                                          <label className="text-xs font-medium text-slate-600 mb-1 block">Tipo de Monto</label>
-                                          <div className="flex space-x-4">
-                                               <button 
-                                                    onClick={() => {
-                                                         setFormTipo('Ingreso');
-                                                         setVentaType(servicios.length > 0 ? 'servicio' : 'manual');
-                                                         const firstBarber = sortedBarbers[0];
-                                                         setSelectedBarberId(firstBarber?.id || ''); 
-                                                    }}
-                                                    disabled={isEditing && currentId !== null || isSaving}
-                                                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 cursor-pointer ${
-                                                         formTipo === 'Ingreso' 
-                                                                 ? 'bg-emerald-50 border-emerald-500 text-emerald-800' 
-                                                                 : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                                                    }`}
-                                                >
-                                                     Ingreso (+)
-                                                </button>
-                                                <button 
-                                                     onClick={() => {
-                                                         setFormTipo('Gasto');
-                                                         setVentaType('manual');
-                                                         setSelectedBarberId('');
-                                                         setSelectedClienteId(''); 
-                                                         setIsCreatingClient(false);
-                                                     }}
-                                                     disabled={isEditing && currentId !== null || isSaving}
-                                                     className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 cursor-pointer ${
-                                                         formTipo === 'Gasto' 
-                                                                 ? 'bg-red-50 border-red-500 text-red-800' 
-                                                                 : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                                                     }`}
-                                                 >
-                                                     Gasto (-)
-                                                 </button>
-                                          </div>
-                                     </div>
-                                     
-                                     {/* Barbero Asignado */}
-                                     {formTipo === 'Ingreso' && (
-                                          <div className="border-t border-slate-100 pt-4">
-                                               <label className="text-xs font-medium text-slate-600 mb-1 block">
-                                                    Barbero Asignado (Obligatorio)
-                                               </label>
-                                               
-                                               {sortedBarbers.length > 0 ? ( 
-                                                    <select
-                                                         value={selectedBarberId}
-                                                         onChange={(e) => setSelectedBarberId(e.target.value)}
-                                                         className={inputClass + ' cursor-pointer'}
-                                                         disabled={isSaving}
-                                                     >
-                                                         <option value="">-- Selecciona un Barbero --</option>
-                                                         {sortedBarbers.map((e) => ( 
-                                                              <option key={e.id} value={e.id}>
-                                                                   {e.nombre} {e.id === uid && '(Yo)'}
-                                                              </option>
-                                                         ))}
-                                                     </select>
-                                               ) : (
-                                                     <div className="text-xs text-red-500 mt-1 p-2 bg-red-50 rounded">
-                                                          ADVERTENCIA: No hay empleados activos.
-                                                     </div>
-                                                )}
-                                          </div>
-                                     )}
-
-                                     {/* ⭐ NUEVO: Método de Pago (Solo para Ingresos) */}
-                                     {formTipo === 'Ingreso' && (
-                                          <div className="pt-0">
-                                                <label className="text-xs font-medium text-slate-600 mb-1 block">Método de Pago</label>
-                                                <select
-                                                     value={formMetodoPago}
-                                                     onChange={(e) => setFormMetodoPago(e.target.value as PaymentMethod)}
-                                                     className={inputClass + ' cursor-pointer'}
-                                                     disabled={isSaving}
-                                                 >
-                                                     <option value="Efectivo">Efectivo</option>
-                                                     <option value="Transferencia">Transferencia</option>
-                                                     <option value="QR/Tarjeta">QR / Tarjeta</option>
-                                                 </select>
-                                          </div>
-                                     )}
-                                     {/* ⭐ FIN NUEVO BLOQUE */}
-
-                                     {/* --- SECCIÓN CLIENTE (CON OPCIÓN CREAR RÁPIDO) --- */}
-                                     {formTipo === 'Ingreso' && (
-                                          <div className="border-t border-slate-100 pt-4">
-                                               <div className="flex justify-between items-center mb-1">
-                                                     <label className="text-xs font-medium text-slate-600">
-                                                          Asignar Cliente (Opcional)
-                                                     </label>
-                                                     <button 
-                                                          type="button"
-                                                          onClick={() => setIsCreatingClient(!isCreatingClient)}
-                                                          className="text-[10px] font-bold text-blue-600 hover:underline cursor-pointer"
-                                                          disabled={isSaving}
-                                                      >
-                                                          {isCreatingClient ? "← Seleccionar Existente" : "+ Nuevo Cliente"}
-                                                      </button>
-                                               </div>
-                                               
-                                               {isCreatingClient ? (
-                                                     // MODO CREAR CLIENTE
-                                                     <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 space-y-2 animate-fadeIn">
-                                                          <p className="text-xs font-bold text-blue-700 mb-1">Nuevo Cliente Rápido</p>
-                                                          <input
-                                                               type="text"
-                                                               placeholder="Nombre del Cliente"
-                                                               value={newClientName}
-                                                               onChange={(e) => setNewClientName(e.target.value)}
-                                                               className="w-full px-3 py-1.5 bg-white border border-blue-200 rounded text-sm focus:outline-none focus:border-blue-400"
-                                                               autoFocus
-                                                               disabled={isSaving}
-                                                          />
-                                                          <input
-                                                               type="tel"
-                                                               placeholder="Teléfono (Opcional)"
-                                                               value={newClientPhone}
-                                                               onChange={(e) => setNewClientPhone(e.target.value)}
-                                                               className="w-full px-3 py-1.5 bg-white border border-blue-200 rounded text-sm focus:outline-none focus:border-blue-400"
-                                                               disabled={isSaving}
-                                                          />
-                                                          <p className="text-[10px] text-blue-600 mt-1">
-                                                                * Se creará y se sumará su primera visita.
-                                                          </p>
-                                                     </div>
-                                                ) : (
-                                                     // MODO SELECCIONAR CLIENTE
-                                                     <>
-                                                          {clientes.length > 0 ? (
-                                                                 <select
-                                                                        value={selectedClienteId}
-                                                                        onChange={(e) => setSelectedClienteId(e.target.value)}
-                                                                        className={inputClass + ' cursor-pointer border-blue-200 bg-blue-50/30'}
-                                                                        disabled={isSaving}
-                                                                    >
-                                                                        <option value="">-- Cliente Anónimo / Sin Cuenta --</option>
-                                                                        {clientes.map((c) => (
-                                                                             <option key={c.id} value={c.id}>
-                                                                                  {c.nombre} {c.visitas ? `(${c.visitas} visitas)` : ''}
-                                                                             </option>
-                                                                        ))}
-                                                                    </select>
-                                                             ) : (
-                                                                  <p className="text-xs text-slate-400 italic mb-2">No tienes clientes registrados aún.</p>
-                                                             )}
-                                                     </>
-                                                 )}
-
-                                                {(selectedClienteId || isCreatingClient) && (
-                                                     <p className="text-[10px] text-emerald-600 mt-1 font-semibold flex items-center gap-1">
-                                                          <span>⭐</span> Se sumará 1 turno al historial del cliente.
-                                                     </p>
-                                                 )}
-                                          </div>
-                                     )}
-
-                                     {/* Selector de Venta (Servicio vs Manual) */}
-                                     {formTipo === 'Ingreso' && !isEditing && (
-                                          <div className="border-t border-slate-100 pt-4">
-                                                <label className="text-xs font-medium text-slate-600 mb-1 block">Origen del Ingreso</label>
-                                                <div className="flex space-x-4 mb-3">
-                                                    <button 
-                                                             onClick={() => { setVentaType('servicio'); setSelectedServiceId(servicios[0]?.id || ''); }}
-                                                             className={ventaType === 'servicio' ? 'flex-1 py-2 text-sm font-medium rounded-md transition-colors bg-slate-900 text-white shadow' : 'flex-1 py-2 text-sm font-medium rounded-md transition-colors text-slate-500 hover:bg-slate-100'}
-                                                             disabled={servicios.length === 0 || isSaving}
-                                                         >
-                                                             Venta de Servicio
-                                                         </button>
-                                                         <button 
-                                                             onClick={() => { setVentaType('manual'); setSelectedServiceId(''); }}
-                                                             className={ventaType === 'manual' ? 'flex-1 py-2 text-sm font-medium rounded-md transition-colors bg-slate-900 text-white shadow' : 'flex-1 py-2 text-sm font-medium rounded-md transition-colors text-slate-500 hover:bg-slate-100'}
-                                                             disabled={isSaving}
-                                                         >
-                                                             Venta/Ingreso Manual
-                                                         </button>
-                                                </div>
-
-                                                {ventaType === 'servicio' && servicios.length > 0 && (
-                                                     <div>
-                                                          <select
-                                                               value={selectedServiceId}
-                                                               onChange={(e) => setSelectedServiceId(e.target.value)}
-                                                               className={inputClass + ' cursor-pointer'}
-                                                               disabled={isSaving}
-                                                           >
-                                                               <option value="">-- Selecciona un Servicio --</option>
-                                                               {servicios.map((s) => (
-                                                                      <option key={s.id} value={s.id}>
-                                                                           {s.nombre} - {formatCurrency(s.precio)}
-                                                                      </option>
-                                                               ))}
-                                                           </select>
-                                                     </div>
-                                                 )}
-                                                 {ventaType === 'servicio' && servicios.length === 0 && (
-                                                     <p className="text-xs text-red-500 mt-1">No hay servicios registrados. Usa el modo manual.</p>
-                                                 )}
-                                          </div>
-                                     )}
-                                     
-                                     {/* Fecha */}
-                                     <div className="border-t border-slate-100 pt-4">
-                                          <label className="text-xs font-medium text-slate-600 mb-1 block">Fecha de Transacción</label>
-                                          <input 
-                                                type="date" 
-                                                value={formDate} 
-                                                onChange={(e) => setFormDate(e.target.value)} 
-                                                className={inputClass + ' cursor-pointer'}
-                                                max={formatDateToInput(new Date())} 
-                                                disabled={isSaving}
-                                           />
-                                     </div>
-
-                                     {/* Monto */}
-                                     {(ventaType === 'manual' || formTipo === 'Gasto' || isEditing) ? (
-                                          <div>
-                                                <label className="text-xs font-medium text-slate-600 mb-1 block">Monto</label>
-                                                <div className="relative">
-                                                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 text-sm">$</span>
-                                                    <input 
-                                                         type="number" 
-                                                         value={formMonto} 
-                                                         onChange={(e) => setFormMonto(e.target.value)} 
-                                                         className={`${inputClass} pl-6 font-medium ${formTipo === 'Ingreso' ? 'text-emerald-700' : 'text-red-700'}`}
-                                                         placeholder="0.00" 
-                                                         min="0"
-                                                         disabled={isSaving}
-                                                     />
-                                                </div>
-                                          </div>
-                                     ) : (
-                                          <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                                                <p className="text-xs text-slate-500">Monto del servicio</p>
-                                                <p className={`font-bold text-lg ${formTipo === 'Ingreso' ? 'text-emerald-700' : 'text-red-700'}`}>
-                                                     {formatCurrency(Number(formMonto || 0))}
-                                                </p>
-                                          </div>
-                                     )}
-
-                                     {/* Descripción */}
-                                     <div>
-                                          <label className="text-xs font-medium text-slate-600 mb-1 block">Descripción</label>
-                                          <textarea 
-                                                 rows={2}
-                                                 value={formDescripcion} 
-                                                 onChange={(e) => setFormDescripcion(e.target.value)} 
-                                                 className={inputClass}
-                                                 placeholder={formTipo === 'Ingreso' ? "Venta de corte y barba" : "Compra de navajas"} 
-                                                 disabled={isSaving}
-                                           />
-                                     </div>
-
-                                     <div className="flex gap-3 pt-2">
-                                          <button 
-                                                onClick={closeModal}
-                                                className={btnSecondary}
-                                                disabled={isSaving}
+                                    
+                                    {/* Tipo de Transacción */}
+                                    <div>
+                                         <label className="text-xs font-medium text-slate-600 mb-1 block">Tipo de Monto</label>
+                                         <div className="flex space-x-4">
+                                            <button 
+                                                 onClick={() => {
+                                                     setFormTipo('Ingreso');
+                                                     const firstBarber = sortedBarbers[0];
+                                                     if (firstBarber) setSelectedBarberId(firstBarber.id);
+                                                     setVentaType(servicios.length > 0 ? 'servicio' : 'manual');
+                                                 }}
+                                                 disabled={isEditing && currentId !== null || isSaving}
+                                                 className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 cursor-pointer ${
+                                                     formTipo === 'Ingreso' 
+                                                         ? 'bg-emerald-50 border-emerald-500 text-emerald-800' 
+                                                         : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                                                 }`}
                                             >
-                                                Cancelar
+                                                 Ingreso (+)
                                             </button>
                                             <button 
-                                                onClick={handleSave}
-                                                className={btnPrimary}
-                                                disabled={formTipo === 'Ingreso' && !selectedBarberId || isSaving}
+                                                 onClick={() => {
+                                                     setFormTipo('Gasto');
+                                                     setVentaType('manual');
+                                                     setSelectedBarberId('');
+                                                     setSelectedClienteId(''); 
+                                                     setIsCreatingClient(false);
+                                                 }}
+                                                 disabled={isEditing && currentId !== null || isSaving}
+                                                 className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border-2 cursor-pointer ${
+                                                     formTipo === 'Gasto' 
+                                                         ? 'bg-red-50 border-red-500 text-red-800' 
+                                                         : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                                                 }`}
                                             >
-                                                {isSaving ? (
-                                                     <>
-                                                          <IconSpinner color="text-white" />
-                                                          Guardando...
-                                                     </>
-                                                ) : (isEditing ? "Guardar Cambios" : "Registrar Transacción")}
+                                                 Gasto (-)
                                             </button>
-                                     </div>
-                                </div>
+                                         </div>
+                                    </div>
+                                    
+                                    {/* Barbero Asignado */}
+                                    {formTipo === 'Ingreso' && (
+                                         <div className="border-t border-slate-100 pt-4">
+                                             <label className="text-xs font-medium text-slate-600 mb-1 block">
+                                                 Barbero Asignado (Obligatorio)
+                                             </label>
+                                             
+                                             {sortedBarbers.length > 0 ? ( 
+                                                 <select
+                                                      value={selectedBarberId}
+                                                      onChange={(e) => setSelectedBarberId(e.target.value)}
+                                                      className={inputClass + ' cursor-pointer'}
+                                                      disabled={isSaving}
+                                                 >
+                                                      <option value="">-- Selecciona un Barbero --</option>
+                                                      {sortedBarbers.map((e) => ( 
+                                                           <option key={e.id} value={e.id}>
+                                                                {e.nombre} {e.id === uid && '(Yo)'}
+                                                           </option>
+                                                      ))}
+                                                 </select>
+                                             ) : (
+                                                 <div className="text-xs text-red-500 mt-1 p-2 bg-red-50 rounded">
+                                                      ADVERTENCIA: No hay empleados activos.
+                                                 </div>
+                                             )}
+                                         </div>
+                                    )}
+
+                                    {/* ⭐ NUEVO: Método de Pago (Solo para Ingresos) */}
+                                    {formTipo === 'Ingreso' && (
+                                         <div className="pt-0">
+                                             <label className="text-xs font-medium text-slate-600 mb-1 block">Método de Pago</label>
+                                             <select
+                                                  value={formMetodoPago}
+                                                  onChange={(e) => setFormMetodoPago(e.target.value as PaymentMethod)}
+                                                  className={inputClass + ' cursor-pointer'}
+                                                  disabled={isSaving}
+                                             >
+                                                  <option value="Efectivo">Efectivo</option>
+                                                  <option value="Transferencia">Transferencia</option>
+                                                  <option value="QR/Tarjeta">QR / Tarjeta</option>
+                                             </select>
+                                         </div>
+                                    )}
+                                    {/* ⭐ FIN NUEVO BLOQUE */}
+
+                                    {/* --- SECCIÓN CLIENTE (CON AUTOCOMPLETE) --- */}
+                                    {formTipo === 'Ingreso' && (
+                                         <div className="border-t border-slate-100 pt-4">
+                                             <div className="flex justify-between items-center mb-1">
+                                                 <label className="text-xs font-medium text-slate-600">
+                                                      Asignar Cliente (Opcional)
+                                                 </label>
+                                                 <button 
+                                                      type="button"
+                                                      onClick={() => {
+                                                          setIsCreatingClient(!isCreatingClient);
+                                                          setClientSearch(""); // Reset search on toggle
+                                                          setSelectedClienteId("");
+                                                      }}
+                                                      className="text-[10px] font-bold text-blue-600 hover:underline cursor-pointer"
+                                                      disabled={isSaving}
+                                                 >
+                                                      {isCreatingClient ? "← Buscar Existente" : "+ Nuevo Cliente"}
+                                                 </button>
+                                             </div>
+                                             
+                                             {isCreatingClient ? (
+                                                 // MODO CREAR CLIENTE
+                                                 <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 space-y-2 animate-fadeIn">
+                                                      <p className="text-xs font-bold text-blue-700 mb-1">Nuevo Cliente Rápido</p>
+                                                      <input
+                                                           type="text"
+                                                           placeholder="Nombre del Cliente"
+                                                           value={newClientName}
+                                                           onChange={(e) => setNewClientName(e.target.value)}
+                                                           className="w-full px-3 py-1.5 bg-white border border-blue-200 rounded text-sm focus:outline-none focus:border-blue-400"
+                                                           autoFocus
+                                                           disabled={isSaving}
+                                                      />
+                                                      <input
+                                                           type="tel"
+                                                           placeholder="Teléfono (Opcional)"
+                                                           value={newClientPhone}
+                                                           onChange={(e) => setNewClientPhone(e.target.value)}
+                                                           className="w-full px-3 py-1.5 bg-white border border-blue-200 rounded text-sm focus:outline-none focus:border-blue-400"
+                                                           disabled={isSaving}
+                                                      />
+                                                      <p className="text-[10px] text-blue-600 mt-1">
+                                                           * Se creará y se sumará su primera visita.
+                                                      </p>
+                                                 </div>
+                                             ) : (
+                                                 // MODO SELECCIONAR CLIENTE (AUTOCOMPLETE INPUT)
+                                                 <div className="relative">
+                                                     <div className="relative">
+                                                         <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                               <IconSearch />
+                                                         </span>
+                                                         <input
+                                                              type="text"
+                                                              value={clientSearch}
+                                                              onChange={(e) => {
+                                                                  setClientSearch(e.target.value);
+                                                                  setShowClientSuggestions(true);
+                                                                  setSelectedClienteId(""); // Reset selection if typing
+                                                              }}
+                                                              onFocus={() => setShowClientSuggestions(true)}
+                                                              // Removed onBlur to allow clicking items (handled by click outside)
+                                                              placeholder="Buscar cliente por nombre..."
+                                                              className={`${inputClass} pl-10 cursor-text`}
+                                                              disabled={isSaving}
+                                                         />
+                                                     </div>
+                                                     
+                                                     {showClientSuggestions && (clientSearch || filteredClientes.length > 0) && (
+                                                         <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto custom-scrollbar">
+                                                             {filteredClientes.length > 0 ? (
+                                                                 filteredClientes.map((client) => (
+                                                                      <div
+                                                                          key={client.id}
+                                                                          onClick={() => {
+                                                                              setSelectedClienteId(client.id);
+                                                                              setClientSearch(client.nombre); // Set name in input
+                                                                              setShowClientSuggestions(false);
+                                                                          }}
+                                                                          className="px-4 py-2 hover:bg-slate-50 cursor-pointer text-sm text-slate-700 border-b border-slate-50 last:border-0"
+                                                                      >
+                                                                          <p className="font-medium">{client.nombre}</p>
+                                                                          {client.telefono && <p className="text-[10px] text-slate-400">{client.telefono}</p>}
+                                                                      </div>
+                                                                 ))
+                                                             ) : (
+                                                                  <div className="px-4 py-3 text-xs text-slate-400 text-center">
+                                                                       No se encontraron clientes.
+                                                                  </div>
+                                                             )}
+                                                         </div>
+                                                     )}
+                                                     
+                                                     {/* Indicador de selección si no está en modo crear */}
+                                                     {selectedClienteId && !isCreatingClient && (
+                                                         <p className="text-[10px] text-blue-600 mt-1 font-semibold">
+                                                             Cliente Seleccionado: {clientes.find(c => c.id === selectedClienteId)?.nombre}
+                                                         </p>
+                                                     )}
+                                                 </div>
+                                             )}
+
+                                             {(selectedClienteId || isCreatingClient) && (
+                                                  <p className="text-[10px] text-emerald-600 mt-1 font-semibold flex items-center gap-1">
+                                                      <span>⭐</span> Se sumará 1 turno al historial del cliente.
+                                                  </p>
+                                             )}
+                                         </div>
+                                    )}
+
+                                    {/* Selector de Venta (Servicio vs Manual) */}
+                                    {formTipo === 'Ingreso' && !isEditing && (
+                                         <div className="border-t border-slate-100 pt-4">
+                                             <label className="text-xs font-medium text-slate-600 mb-1 block">Origen del Ingreso</label>
+                                             <div className="flex space-x-4 mb-3">
+                                                 <button 
+                                                      onClick={() => { setVentaType('servicio'); setSelectedServiceId(servicios[0]?.id || ''); }}
+                                                      className={ventaType === 'servicio' ? 'flex-1 py-2 text-sm font-medium rounded-md transition-colors bg-slate-900 text-white shadow' : 'flex-1 py-2 text-sm font-medium rounded-md transition-colors text-slate-500 hover:bg-slate-100'}
+                                                      disabled={servicios.length === 0 || isSaving}
+                                                 >
+                                                      Venta de Servicio
+                                                 </button>
+                                                 <button 
+                                                      onClick={() => { setVentaType('manual'); setSelectedServiceId(''); }}
+                                                      className={ventaType === 'manual' ? 'flex-1 py-2 text-sm font-medium rounded-md transition-colors bg-slate-900 text-white shadow' : 'flex-1 py-2 text-sm font-medium rounded-md transition-colors text-slate-500 hover:bg-slate-100'}
+                                                      disabled={isSaving}
+                                                 >
+                                                      Venta/Ingreso Manual
+                                                 </button>
+                                             </div>
+
+                                             {ventaType === 'servicio' && servicios.length > 0 && (
+                                                 <div>
+                                                      <select
+                                                           value={selectedServiceId}
+                                                           onChange={(e) => setSelectedServiceId(e.target.value)}
+                                                           className={inputClass + ' cursor-pointer'}
+                                                           disabled={isSaving}
+                                                      >
+                                                           <option value="">-- Selecciona un Servicio --</option>
+                                                           {servicios.map((s) => (
+                                                                <option key={s.id} value={s.id}>
+                                                                     {s.nombre} - {formatCurrency(s.precio)}
+                                                                </option>
+                                                           ))}
+                                                      </select>
+                                                 </div>
+                                             )}
+                                             {ventaType === 'servicio' && servicios.length === 0 && (
+                                                 <p className="text-xs text-red-500 mt-1">No hay servicios registrados. Usa el modo manual.</p>
+                                             )}
+                                         </div>
+                                    )}
+                                    
+                                    {/* Fecha */}
+                                    <div className="border-t border-slate-100 pt-4">
+                                         <label className="text-xs font-medium text-slate-600 mb-1 block">Fecha de Transacción</label>
+                                         <input 
+                                              type="date" 
+                                              value={formDate} 
+                                              onChange={(e) => setFormDate(e.target.value)} 
+                                              className={inputClass + ' cursor-pointer'}
+                                              max={formatDateToInput(new Date())} 
+                                              disabled={isSaving}
+                                         />
+                                    </div>
+
+                                    {/* Monto */}
+                                    {(ventaType === 'manual' || formTipo === 'Gasto' || isEditing) ? (
+                                         <div>
+                                             <label className="text-xs font-medium text-slate-600 mb-1 block">Monto</label>
+                                             <div className="relative">
+                                                 <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 text-sm">$</span>
+                                                 <input 
+                                                      type="number" 
+                                                      value={formMonto} 
+                                                      onChange={(e) => setFormMonto(e.target.value)} 
+                                                      className={`${inputClass} pl-6 font-medium ${formTipo === 'Ingreso' ? 'text-emerald-700' : 'text-red-700'}`}
+                                                      placeholder="0.00" 
+                                                      min="0"
+                                                      disabled={isSaving}
+                                                 />
+                                             </div>
+                                         </div>
+                                    ) : (
+                                         <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                                             <p className="text-xs text-slate-500">Monto del servicio</p>
+                                             <p className={`font-bold text-lg ${formTipo === 'Ingreso' ? 'text-emerald-700' : 'text-red-700'}`}>
+                                                  {formatCurrency(Number(formMonto || 0))}
+                                             </p>
+                                         </div>
+                                    )}
+
+                                    {/* Descripción */}
+                                    <div>
+                                         <label className="text-xs font-medium text-slate-600 mb-1 block">Descripción</label>
+                                         <textarea 
+                                              rows={2}
+                                              value={formDescripcion} 
+                                              onChange={(e) => setFormDescripcion(e.target.value)} 
+                                              className={inputClass}
+                                              placeholder={formTipo === 'Ingreso' ? "Venta de corte y barba" : "Compra de navajas"} 
+                                              disabled={isSaving}
+                                         />
+                                    </div>
+
+                                    <div className="flex gap-3 pt-2">
+                                         <button 
+                                              onClick={closeModal}
+                                              className={btnSecondary}
+                                              disabled={isSaving}
+                                         >
+                                              Cancelar
+                                         </button>
+                                         <button 
+                                              onClick={handleSave}
+                                              className={btnPrimary}
+                                              disabled={formTipo === 'Ingreso' && !selectedBarberId || isSaving}
+                                         >
+                                              {isSaving ? (
+                                                   <>
+                                                        <IconSpinner color="text-white" />
+                                                        Guardando...
+                                                   </>
+                                              ) : (isEditing ? "Guardar Cambios" : "Registrar Transacción")}
+                                         </button>
+                                    </div>
+                               </div>
                           </div>
                      </div>
                 )}
@@ -2031,10 +1985,10 @@ export const Ventas: React.FC = () => {
                                 onClick={(e) => e.stopPropagation()}
                           >
                                <div className="flex items-center gap-3">
-                                     <div className="p-2 rounded-full bg-red-100 text-red-600">
-                                          <IconAlert />
-                                     </div>
-                                     <h3 className="text-lg font-bold text-slate-900">Confirmar Eliminación</h3>
+                                    <div className="p-2 rounded-full bg-red-100 text-red-600">
+                                         <IconAlert />
+                                    </div>
+                                    <h3 className="text-lg font-bold text-slate-900">Confirmar Eliminación</h3>
                                </div>
                                
                                <p className="text-sm text-slate-700">
@@ -2042,36 +1996,36 @@ export const Ventas: React.FC = () => {
                                </p>
 
                                <div className="p-3 border border-slate-100 rounded-lg text-sm bg-slate-50">
-                                     <p className="font-semibold">{transactionToDelete.descripcion}</p>
-                                     <p className={`text-xs ${transactionToDelete.tipo === 'Ingreso' ? 'text-emerald-600' : 'text-red-600'}`}>
-                                          {transactionToDelete.tipo}: {formatCurrency(transactionToDelete.monto)}
-                                     </p>
-                                     <p className="text-xs text-slate-400">Fecha: {transactionToDelete.date}</p>
-                                     {transactionToDelete.barberName && (
-                                          <p className="text-xs text-slate-400">Barbero: {transactionToDelete.barberName}</p>
-                                     )}
+                                    <p className="font-semibold">{transactionToDelete.descripcion}</p>
+                                    <p className={`text-xs ${transactionToDelete.tipo === 'Ingreso' ? 'text-emerald-600' : 'text-red-600'}`}>
+                                         {transactionToDelete.tipo}: {formatCurrency(transactionToDelete.monto)}
+                                    </p>
+                                    <p className="text-xs text-slate-400">Fecha: {transactionToDelete.date}</p>
+                                    {transactionToDelete.barberName && (
+                                         <p className="text-xs text-slate-400">Barbero: {transactionToDelete.barberName}</p>
+                                    )}
                                </div>
 
                                <div className="flex gap-3 pt-2">
-                                     <button 
-                                           onClick={() => setDeleteConfirmOpen(false)} 
-                                           className={btnSecondary}
-                                           disabled={isDeleting}
-                                       >
-                                           Cancelar
-                                       </button>
-                                       <button 
-                                           onClick={handleDelete} 
-                                           className={btnPrimary.replace('bg-slate-900', 'bg-red-600 hover:bg-red-700')}
-                                           disabled={isDeleting}
-                                       >
-                                           {isDeleting ? (
-                                                <>
-                                                     <IconSpinner color="text-white" />
-                                                     Eliminando...
-                                                </>
-                                           ) : "Sí, Eliminar"}
-                                       </button>
+                                    <button 
+                                         onClick={() => setDeleteConfirmOpen(false)} 
+                                         className={btnSecondary}
+                                         disabled={isDeleting}
+                                    >
+                                         Cancelar
+                                    </button>
+                                    <button 
+                                         onClick={handleDelete} 
+                                         className={btnPrimary.replace('bg-slate-900', 'bg-red-600 hover:bg-red-700')}
+                                         disabled={isDeleting}
+                                    >
+                                         {isDeleting ? (
+                                              <>
+                                                   <IconSpinner color="text-white" />
+                                                   Eliminando...
+                                              </>
+                                         ) : "Sí, Eliminar"}
+                                    </button>
                                </div>
                           </div>
                      </div>
