@@ -7,7 +7,7 @@ import logo from "../assets/logo-2.png";
 const DROPDOWN_MENU_ITEMS = {
   GYM: [
     { name: "Conocer más", path: "/gym-landing/", icon: Zap },
-    { name: "Acceder a la App", path: "/gym-manager/", icon: Dumbbell },
+    { name: "Acceder a la App", path: "/app-gym/login", icon: Dumbbell },
   ],
   BARBER: [
     { name: "Conocer más", path: "/barber-landing/", icon: Zap },
